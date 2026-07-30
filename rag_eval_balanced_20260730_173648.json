@@ -1,0 +1,120 @@
+{
+  "fecha": "2026-07-30T17:36:48.337903",
+  "preguntas": 12,
+  "scores": {
+    "faithfulness": 0.9167,
+    "answer_relevancy": 1.0,
+    "context_precision": 0.7192,
+    "overall": 0.8786
+  },
+  "detalle": [
+    {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "justificacion": "La respuesta es precisa, está totalmente respaldada por el CHUNK 1 y responde directamente a ambos componentes de la pregunta del usuario.",
+      "pregunta": "¿Qué es un sistema de perfil de nutrientes (SPN) y para qué se utiliza en el rotulado nutricional frontal?",
+      "respuesta": "Un sistema de perfil de nutrientes (SPN) es una herramienta que permite definir cuáles son los productos que estarán sujetos a las normas de etiquetado frontal. Se utiliza estableciendo un punto de corte (valores máximos) que determina qué productos quedan etiquetados y cuáles no.\n\nFuente: *2024-12-manual_normativa_original.pdf*, página 7.",
+      "chunks": 3
+    },
+    {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "justificacion": "La respuesta es precisa, está totalmente respaldada por el CHUNK 1 y responde directamente a la consulta del usuario.",
+      "pregunta": "¿Cuáles son los nutrientes críticos que deben declararse en el rotulado nutricional frontal?",
+      "respuesta": "Los nutrientes críticos definidos que deben declararse en el rotulado nutricional frontal son:\n\n*   Azúcares añadidos.\n*   Grasas totales.\n*   Grasas saturadas.\n*   Sodio.\n\nFuente: *2024-12-manual_normativa_original.pdf*, página 9.",
+      "chunks": 3
+    },
+    {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 0.66,
+      "justificacion": "La respuesta es precisa y está totalmente respaldada por el CHUNK 1. El contexto recuperado incluye información adicional (CHUNK 2 y 3) que no era necesaria para responder la pregunta específica, lo que reduce ligeramente la precisión del contexto.",
+      "pregunta": "¿A partir de qué porcentaje de calorías provenientes de azúcares añadidos corresponde declarar el sello de exceso en azúcares?",
+      "respuesta": "Corresponde declarar el sello de \"EXCESO EN AZÚCAR\" cuando el 10% o más de las calorías del alimento provienen de los azúcares añadidos.\n\nFuente: 2024-12-manual_normativa_original.pdf | Página: 13 y Página: 45.",
+      "chunks": 3
+    },
+    {
+      "faithfulness": 0.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 0.33,
+      "justificacion": "La respuesta es incorrecta según el contexto. El CHUNK 3 indica que el límite es 'Grasas Saturadas ≥ 10% del total de energía', mientras que la respuesta afirma erróneamente que es del 'total de energía proveniente de grasas saturadas'.",
+      "pregunta": "¿Cuál es el límite de grasas saturadas para declarar el sello de exceso en grasas saturadas?",
+      "respuesta": "El límite para declarar el sello de exceso en grasas saturadas es cuando estas representan el 10% o más del total de energía proveniente de grasas saturadas.\n\nFuente: 2024-12-manual_normativa_original.pdf | Página: 38",
+      "chunks": 3
+    },
+    {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 0.66,
+      "justificacion": "La respuesta es precisa y está respaldada por el CHUNK 3. El contexto recuperado incluye información técnica de cálculo que no era necesaria para responder la pregunta específica, lo que reduce la precisión del contexto.",
+      "pregunta": "¿Cuál es el límite de sodio en miligramos por 100 gramos de producto que determina el sello de exceso en sodio?",
+      "respuesta": "El límite de sodio que determina la aplicación de un sello de advertencia es de 300 mg o más de sodio cada 100 gramos de producto.\n\nFuente: 2024-12-manual_normativa_original.pdf | Página: 58",
+      "chunks": 3
+    },
+    {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "justificacion": "La respuesta es precisa, está totalmente fundamentada en el CHUNK 1 y responde directamente a la consulta del usuario utilizando la información técnica proporcionada.",
+      "pregunta": "¿Cuándo se entiende que un alimento contiene edulcorantes y debe declararlo en el rotulado nutricional frontal?",
+      "respuesta": "Se entiende que un alimento contiene edulcorantes cuando en su lista de ingredientes se incluye al menos un aditivo con función edulcorante.\n\nEs importante destacar que este criterio aplica específicamente cuando el aditivo se utiliza con el fin tecnológico de endulzar. Si el aditivo figura en el listado con otra función (por ejemplo, como antihumectante), no se deberá consignar la leyenda precautoria en el rótulo.\n\nFuente: *2024-12-manual_normativa_original.pdf*, página 11.",
+      "chunks": 3
+    },
+    {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 0.66,
+      "justificacion": "La respuesta es precisa y está totalmente respaldada por el CHUNK 3. El CHUNK 1 y 2 son irrelevantes para la respuesta específica, lo que reduce la precisión del contexto recuperado.",
+      "pregunta": "¿Qué productos no se encuentran alcanzados por la normativa de rotulado nutricional frontal?",
+      "respuesta": "Los productos que no se encuentran alcanzados por la normativa de rotulado nutricional frontal son:\n\n*   Los alimentos para propósitos médicos específicos.\n*   Los suplementos dietarios.\n\nFuente: *2024-12-manual_normativa_original.pdf*, página 8.",
+      "chunks": 3
+    },
+    {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "justificacion": "La respuesta es precisa, utiliza correctamente la fórmula extraída del CHUNK 1 y cita la fuente de manera adecuada.",
+      "pregunta": "¿Cuál es la fórmula para calcular el área de la cara principal disponible para los sellos (ADS) cuando un producto lleva dos o más sellos?",
+      "respuesta": "La fórmula para calcular el área de la cara principal disponible para los sellos (ADS) en productos con superficies entre 20 cm² y 300 cm² que deban llevar dos o más sellos es:\n\n**ADS = área de la cara principal X 0,65**\n\nFuente: *2024-12-manual_normativa_original.pdf*, página 22.",
+      "chunks": 3
+    },
+    {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 0.66,
+      "justificacion": "La respuesta es precisa y fiel al contexto proporcionado (específicamente el CHUNK 1). El contexto recuperado incluye información irrelevante (CHUNK 2 y 3) que no aporta a la respuesta, afectando la precisión del contexto.",
+      "pregunta": "¿Cuáles son las prohibiciones establecidas por la normativa para el rotulado de los productos con sellos de advertencia?",
+      "respuesta": "De acuerdo con la normativa, los alimentos y bebidas analcohólicas envasadas que contengan al menos un sello de advertencia (octógono y/o leyenda) tienen prohibido consignar en su rótulo información nutricional complementaria (INC) referida al nutriente crítico o caloría que se encuentre en exceso.\n\nLa INC se define como cualquier representación que afirme, sugiera o implique que un producto posee propiedades nutricionales particulares, incluyendo marcas, en relación con su valor energético, contenido de proteínas, grasas, carbohidratos, fibra alimentaria, vitaminas y minerales.\n\nFuente: *2024-12-manual_normativa_original.pdf*, página 24.",
+      "chunks": 3
+    },
+    {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 0.0,
+      "justificacion": "La respuesta es fiel al contexto, ya que identifica correctamente que la información sobre publicidad no está presente en los fragmentos recuperados, los cuales solo abordan el rotulado.",
+      "pregunta": "¿Qué restricciones tiene la publicidad de productos que llevan sellos de advertencia de exceso de nutrientes críticos?",
+      "respuesta": "La información no está disponible en los documentos.\n\nEl contexto proporcionado detalla las prohibiciones para el **rotulado** de los productos (página 24), pero no menciona restricciones específicas sobre la **publicidad** de los mismos.",
+      "chunks": 3
+    },
+    {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 0.66,
+      "justificacion": "La respuesta es fiel al contexto proporcionado (específicamente el CHUNK 3). El CHUNK 1 es solo un índice y el CHUNK 2 es irrelevante para la pregunta, lo que reduce la precisión del contexto.",
+      "pregunta": "¿Cómo se obtiene el contenido de azúcares añadidos de un alimento para evaluar si corresponde el sello de exceso?",
+      "respuesta": "Para obtener el contenido de azúcares añadidos de un producto, se debe realizar el siguiente procedimiento:\n\n1. **Identificar los ingredientes** que aportan azúcares añadidos (ver apartado “¿cuándo se entiende que hay agregado de azúcares?”).\n2. **Establecer la cantidad total de mono y disacáridos** que aporta cada ingrediente. Esta información se obtiene identificando los azúcares de la composición del producto a través de la formulación (receta) establecida por el elaborador.\n\nAdicionalmente, se debe considerar que si el valor es menor o igual a 4 Kcal por porción y la adición de azúcares añadidos es menor o igual a 0,5 gramos por porción, se deberá adoptar el valor de 0 gramos de azúcares añadidos.\n\nFuente: *2024-12-manual_normativa_original.pdf*, página 13.",
+      "chunks": 3
+    },
+    {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "justificacion": "La respuesta es precisa, utiliza correctamente la información del CHUNK 1 y responde directamente a la pregunta del usuario.",
+      "pregunta": "¿El jugo de naranja exprimido del Ejemplo 1 debe llevar sellos de advertencia? ¿Por qué?",
+      "respuesta": "No, el jugo de naranja exprimido del Ejemplo 1 no debe llevar sellos de advertencia.\n\nDe acuerdo con el documento, esto se debe a que el producto está constituido por un único ingrediente (100% del alimento), no tiene agregado de nutrientes críticos, ni contiene edulcorantes o cafeína. Por lo tanto, no se encuentra alcanzado por la normativa y no aplica la evaluación del perfil de nutrientes.\n\nFuente: 2024-12-manual_normativa_original.pdf, página 34.",
+      "chunks": 3
+    }
+  ]
+}

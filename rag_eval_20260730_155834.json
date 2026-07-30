@@ -1,0 +1,84 @@
+{
+  "fecha": "2026-07-30T15:58:34.583216",
+  "preguntas": 8,
+  "scores": {
+    "faithfulness": 0.9375,
+    "answer_relevancy": 0.875,
+    "context_precision": 0.4562,
+    "overall": 0.7562
+  },
+  "detalle": [
+    {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 0.0,
+      "justificacion": "La respuesta es correcta al indicar que la información no está disponible, ya que el contexto recuperado no menciona sellos de advertencia ni normativa de etiquetado frontal.",
+      "pregunta": "¿Cuántos sellos debe llevar el alfajor relleno de dulce de leche del Ejemplo 5 y cuáles son?",
+      "respuesta": "La información no está disponible en los documentos.",
+      "chunks": 2
+    },
+    {
+      "faithfulness": 0.5,
+      "answer_relevancy": 1.0,
+      "context_precision": 0.66,
+      "justificacion": "La respuesta contiene una redundancia lógica al decir '10% del total de energía proveniente de azúcares añadidos', cuando el contexto indica correctamente que es el 10% del total de energía (calorías) proveniente de azúcares añadidos.",
+      "pregunta": "¿A partir de qué porcentaje de calorías provenientes de azúcares añadidos corresponde declarar el sello de exceso en azúcares?",
+      "respuesta": "Corresponde declarar el sello de exceso en azúcares cuando los azúcares añadidos representan un valor mayor o igual al 10% del total de energía proveniente de azúcares añadidos.\n\nFuente: 2024-12-manual_normativa_original.pdf | Página: 43",
+      "chunks": 3
+    },
+    {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 0.66,
+      "justificacion": "La respuesta es precisa y está fundamentada en el CHUNK 3. El contexto recuperado incluye información técnica de cálculo que no era necesaria para responder la pregunta específica, lo que reduce la precisión del contexto.",
+      "pregunta": "¿Cuál es el límite de sodio en miligramos por 100 gramos de producto que determina el sello de exceso en sodio?",
+      "respuesta": "El límite de sodio que determina la declaración de un sello de advertencia es de 300 mg o más de sodio cada 100 gramos de producto.\n\nFuente: 2024-12-manual_normativa_original.pdf | Página: 58",
+      "chunks": 3
+    },
+    {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 0.0,
+      "justificacion": "La respuesta es correcta al indicar que la información no está disponible, dado que el contexto recuperado está vacío.",
+      "pregunta": "Según el ejemplo de las aceitunas en salmuera, ¿qué sello debe llevar el producto y por qué?",
+      "respuesta": "La información no está disponible en los documentos.",
+      "chunks": 0
+    },
+    {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "justificacion": "La respuesta es precisa, está totalmente respaldada por el contexto proporcionado y responde directamente a la pregunta del usuario.",
+      "pregunta": "¿El jugo de naranja exprimido del Ejemplo 1 debe llevar sellos de advertencia? ¿Por qué?",
+      "respuesta": "No, el jugo de naranja exprimido del Ejemplo 1 no debe llevar sellos de advertencia.\n\nEsto se debe a que, de acuerdo a los criterios establecidos, se trata de un alimento que no se encuentra alcanzado por la normativa, por lo que no aplica la evaluación del perfil de nutrientes. El producto está constituido por un único ingrediente (100% del alimento) y no tiene agregado de nutrientes críticos, edulcorantes ni cafeína.\n\nFuente: 2024-12-manual_normativa_original.pdf | Página: 34",
+      "chunks": 1
+    },
+    {
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 0.0,
+      "justificacion": "La respuesta es fiel al contexto porque la información sobre sellos octogonales no existe en los documentos, pero la relevancia es baja porque el modelo no identifica que la respuesta es una negativa correcta ante la ausencia de datos.",
+      "pregunta": "¿Cuántos sellos octogonales corresponden al mix de maníes, pasas de uva y almendras del Ejemplo 4?",
+      "respuesta": "La información no está disponible en los documentos.",
+      "chunks": 2
+    },
+    {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "justificacion": "La respuesta es precisa, utiliza la fórmula correcta extraída directamente del contexto y responde de manera directa a la pregunta del usuario.",
+      "pregunta": "¿Cuál es la fórmula para calcular el área de la cara principal disponible para los sellos (ADS) cuando un producto lleva dos o más sellos?",
+      "respuesta": "La fórmula para calcular el área de la cara principal disponible para los sellos (ADS) es:\n\n**ADS = área de la cara principal X 0,65**\n\nFuente: *2024-12-manual_normativa_original.pdf*, página 22.",
+      "chunks": 3
+    },
+    {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 0.33,
+      "justificacion": "La respuesta es totalmente fiel al contexto y responde con precisión a la pregunta. El contexto recuperado contiene información irrelevante (chunks 2 y 3) que no aporta a la respuesta, afectando la precisión del contexto.",
+      "pregunta": "¿Qué productos no se encuentran alcanzados por la normativa de rotulado nutricional frontal?",
+      "respuesta": "Los productos que no se encuentran alcanzados por la normativa de rotulado nutricional frontal son los siguientes:\n\n*   Los alimentos para propósitos médicos específicos.\n*   Los suplementos dietarios.\n*   Las fórmulas para lactantes, niños y niñas hasta los 36 meses de edad.\n*   Los productos no envasados para la venta al consumidor.\n*   Los productos no acondicionados para la venta al consumidor (uso industrial y/o servicios de alimentación).\n*   Los alimentos preparados en restaurantes o comercios gastronómicos.\n*   Los productos fraccionados al peso en mostrador a la vista de las y los consumidores.\n*   Los alimentos acondicionados para la venta al público constituidos por un único ingrediente, sin procesamiento o mínimamente procesados, que no poseen agregado de nutrientes críticos.\n\nFuente: *2024-12-manual_normativa_original.pdf*, página 8.",
+      "chunks": 3
+    }
+  ]
+}

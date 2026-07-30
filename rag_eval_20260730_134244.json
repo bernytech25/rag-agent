@@ -1,0 +1,84 @@
+{
+  "fecha": "2026-07-30T13:42:44.818388",
+  "preguntas": 8,
+  "scores": {
+    "faithfulness": 1.0,
+    "answer_relevancy": 0.875,
+    "context_precision": 0.54,
+    "overall": 0.805
+  },
+  "detalle": [
+    {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 0.0,
+      "justificacion": "La respuesta es correcta al indicar que la información no está disponible, ya que el contexto recuperado no contiene el 'Ejemplo 5' ni los datos nutricionales necesarios para determinar los sellos.",
+      "pregunta": "¿Cuántos sellos debe llevar el alfajor relleno de dulce de leche del Ejemplo 5 y cuáles son?",
+      "respuesta": "La información no está disponible en los documentos.",
+      "chunks": 3
+    },
+    {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 0.66,
+      "justificacion": "La respuesta es precisa y está respaldada por el CHUNK 1. El contexto recuperado contiene información irrelevante (CHUNK 2 y 3) que no aporta a la respuesta, afectando la precisión del contexto.",
+      "pregunta": "¿A partir de qué porcentaje de calorías provenientes de azúcares añadidos corresponde declarar el sello de exceso en azúcares?",
+      "respuesta": "Corresponde declarar el sello de exceso en azúcares cuando los azúcares añadidos representan más del 10% del total de energía proveniente de dichos azúcares.\n\nFuente: 2024-12-manual_normativa_1 (1).pdf | Página: 43",
+      "chunks": 3
+    },
+    {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 0.66,
+      "justificacion": "La respuesta es precisa y está respaldada por el CHUNK 3. El contexto recuperado incluye información irrelevante (CHUNK 1 y 2) sobre cálculos, pero el CHUNK 3 contiene la respuesta exacta.",
+      "pregunta": "¿Cuál es el límite de sodio en miligramos por 100 gramos de producto que determina el sello de exceso en sodio?",
+      "respuesta": "El límite de sodio que determina el sello de advertencia por exceso es de 300 mg o más de sodio cada 100 gramos de producto.\n\nFuente: 2024-12-manual_normativa_1 (1).pdf | Página: 58",
+      "chunks": 3
+    },
+    {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 0.0,
+      "justificacion": "La respuesta es correcta al indicar que la información no está disponible, ya que el contexto proporcionado no menciona el ejemplo de las aceitunas en salmuera.",
+      "pregunta": "Según el ejemplo de las aceitunas en salmuera, ¿qué sello debe llevar el producto y por qué?",
+      "respuesta": "La información no está disponible en los documentos.",
+      "chunks": 3
+    },
+    {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "justificacion": "La respuesta es precisa, está totalmente respaldada por el CHUNK 1 y responde directamente a la pregunta del usuario utilizando la información técnica proporcionada.",
+      "pregunta": "¿El jugo de naranja exprimido del Ejemplo 1 debe llevar sellos de advertencia? ¿Por qué?",
+      "respuesta": "No, el jugo de naranja exprimido no debe llevar sellos de advertencia.\n\nDe acuerdo con el documento, esto se debe a que el producto está constituido por un único ingrediente (jugo de naranja exprimido) que representa el 100% del alimento, no tiene agregado de nutrientes críticos, ni contiene edulcorantes o cafeína. Por lo tanto, se trata de un alimento que no se encuentra alcanzado por la normativa y no aplica la evaluación del perfil de nutrientes.\n\nFuente: 2024-12-manual_normativa_1 (1).pdf | Página: 34",
+      "chunks": 3
+    },
+    {
+      "faithfulness": 1.0,
+      "answer_relevancy": 0.0,
+      "context_precision": 0.0,
+      "justificacion": "La respuesta es fiel al contexto (que no contiene la información solicitada), pero el sistema falló en la recuperación, ya que el contexto proporcionado no incluye el 'Ejemplo 4' ni la cantidad de sellos para ese producto específico.",
+      "pregunta": "¿Cuántos sellos octogonales corresponden al mix de maníes, pasas de uva y almendras del Ejemplo 4?",
+      "respuesta": "La información no está disponible en los documentos.",
+      "chunks": 3
+    },
+    {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "justificacion": "La respuesta extrae correctamente la fórmula del 65% del CHUNK 2 y la proporción de los descriptores del CHUNK 1, citando adecuadamente las fuentes proporcionadas.",
+      "pregunta": "¿Cuál es la fórmula para calcular el área de la cara principal disponible para los sellos (ADS) cuando un producto lleva dos o más sellos?",
+      "respuesta": "Para los productos con un área de la cara principal mayor o igual a 20 cm² y menor o igual a 300 cm² que deban llevar dos o más sellos, el ADS corresponde al **65% de la superficie del área de la cara principal del envase** (Fuente: *2024-12-manual_normativa_1 (1).pdf*, página 22).\n\nAsimismo, el documento especifica que el ADS permite garantizar que los descriptores gráficos ocupen una superficie proporcional al número de sellos sobre el área de la cara principal:\n*   10% para dos sellos.\n*   15% para tres sellos.\n*   20% para cuatro sellos.\n*   De forma proporcional para N descriptores.\n\n(Fuente: *2024-12-manual_normativa_1 (1).pdf*, página 31).",
+      "chunks": 3
+    },
+    {
+      "faithfulness": 1.0,
+      "answer_relevancy": 1.0,
+      "context_precision": 1.0,
+      "justificacion": "La respuesta extrae con precisión la lista de excepciones contenida en el CHUNK 1, respondiendo directamente a la consulta del usuario con información totalmente fundamentada en el contexto.",
+      "pregunta": "¿Qué productos no se encuentran alcanzados por la normativa de rotulado nutricional frontal?",
+      "respuesta": "Los productos que no se encuentran alcanzados por la normativa de rotulado nutricional frontal son los siguientes:\n\n*   Los alimentos para propósitos médicos específicos.\n*   Los suplementos dietarios.\n*   Las fórmulas para lactantes, niños y niñas hasta los 36 meses de edad.\n*   Los productos no envasados para la venta al consumidor.\n*   Los productos no acondicionados para la venta al consumidor (uso industrial y/o servicios de alimentación).\n*   Los alimentos preparados en restaurantes o comercios gastronómicos.\n*   Los productos fraccionados al peso en mostrador a la vista de las y los consumidores.\n*   Los alimentos acondicionados para la venta al público constituidos por un único ingrediente, sin procesamiento o mínimamente procesados, que no poseen agregado de nutrientes críticos.\n\nFuente: *2024-12-manual_normativa_1 (1).pdf*, página 8.",
+      "chunks": 3
+    }
+  ]
+}
