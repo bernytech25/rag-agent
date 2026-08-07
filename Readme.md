@@ -1,243 +1,265 @@
-# RAG Agent — Etiquetado Nutricional Frontal Argentina
+# RAG Agent — Multidocument Nutritional Labeling (Argentina)
 
-**Agente conversacional con Retrieval Augmented Generation (RAG)** para consultas sobre la normativa de etiquetado nutricional frontal en Argentina (Ley 27.642 y Decreto 151/2022).
+**Multidocument conversational agent with Retrieval Augmented Generation (RAG)** for querying Argentine front-of-pack nutritional labeling regulations (Law 27.642 and Decree 151/2022). Designed to scale across multiple regulatory documents.
 
-- 🔍 **Retrieval local** (FAISS + HuggingFace embeddings, sin costos)
-- 🧠 **Generación con Gemini API** (free tier, sin créditos)
-- 📊 **Evaluado con RAGAS** — Score: **0.862** (Faithfulness 1.0)
+- 🔍 **Local retrieval** (FAISS + HuggingFace embeddings, zero cloud costs)
+- 🧠 **Generation via Gemini API** (free tier, no credits required)
+- 📄 **Multidocument ingestion** — index and query across multiple PDFs simultaneously
+- 📊 **Evaluated with RAGAS** — Score: **0.862** (Faithfulness 1.0)
 - ⚡ **FastAPI + Docker ready**
-- 🎯 **Producción-ready**
+- 🎯 **Production-ready**
 
 ---
 
-## Stack Tecnológico
+## Tech Stack
 
-| Componente | Tecnología |
-|-----------|-----------|
+| Component | Technology |
+|-----------|------------|
 | **Retrieval** | FAISS + HuggingFace embeddings (`sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`) |
-| **Reranking** | Flashrank (ms-marco-TinyBERT-L-2-v2) |
-| **Extracción de tablas** | pdfplumber |
+| **Reranking** | Flashrank (`ms-marco-TinyBERT-L-2-v2`) |
+| **Table Extraction** | pdfplumber |
 | **LLM** | Google Gemini API (free tier, `gemini-3.1-flash-lite`) |
 | **API** | FastAPI |
-| **Evaluación** | RAGAS (Faithfulness, Answer Relevancy, Context Precision) |
-| **Control de versión** | Git + GitHub |
+| **Evaluation** | RAGAS (Faithfulness, Answer Relevancy, Context Precision) |
+| **Version Control** | Git + GitHub |
 
 ---
 
-## Arquitectura
+## Architecture
 
 ```
-Pregunta del usuario
-        ↓
-    FAISS (retrieval)
-  ↓ 15 candidatos
-    Flashrank (reranking)
+User query
+    ↓
+FAISS (multidocument retrieval)
+  ↓ 15 candidates
+Flashrank (reranking)
   ↓ top 5 chunks
-    Gemini LLM (generación)
-        ↓
-    Respuesta + fuentes
+Gemini LLM (generation)
+    ↓
+Answer + sources
 ```
 
-**Chunking:** 800 caracteres, 200 overlap. Tablas extraídas intactas con pdfplumber.
+**Chunking:** 800 characters, 200 overlap. Tables extracted intact via pdfplumber.  
+**Multidocument:** Drop multiple PDFs into `data/` — all are indexed and searchable through a single query endpoint.
 
 ---
 
-## Instalación
+## Installation
 
-### Requisitos
+### Requirements
+
 - Python 3.10+
 - `pip`
-- Gemini API key (free tier en https://aistudio.google.com)
+- Gemini API key (free tier at https://aistudio.google.com)
 
 ### Setup
 
 ```bash
-# Clonar repo
+# Clone repo
 git clone https://github.com/bernytech25/rag-agent.git
 cd rag-agent
 
-# Crear entorno virtual
+# Create virtual environment
 python -m venv venv
 venv\Scripts\activate  # Windows
+source venv/bin/activate  # macOS/Linux
 
-# Instalar dependencias
+# Install dependencies
 pip install -r requirements.txt
 
-# Crear .env
-echo "GEMINI_API_KEY=tu_api_key_aqui
+# Create .env
+echo "GEMINI_API_KEY=your_api_key_here
 GEMINI_MODEL=gemini-3.1-flash-lite
 JUDGE_MODEL=gemini-3.1-flash-lite
-JWT_SECRET_KEY=cambiar-esto-en-produccion
+JWT_SECRET_KEY=change-this-in-production
 JWT_EXPIRE_MINUTES=60" > .env
 ```
 
 ---
 
-## Uso
+## Usage
 
-### API Local (FastAPI)
+### Local API (FastAPI)
 
 ```bash
 python -m uvicorn app.main:app --reload
 ```
 
-Abrí `http://localhost:8000/docs` (Swagger UI) y testea:
+Open `http://localhost:8000/docs` (Swagger UI) and test:
 
 **Endpoint:** `POST /ask`
 
 ```json
 {
-  "question": "¿Cuál es el límite de sodio para el sello de exceso en sodio?",
+  "question": "What is the sodium limit for the excess sodium warning label?",
   "history": []
 }
 ```
 
-**Respuesta:**
+**Response:**
+
 ```json
 {
-  "answer": "El límite de sodio que determina el sello de advertencia es de 300 mg o más de sodio cada 100 gramos de producto...",
-  "sources": ["2024-12-manual_normativa_original.pdf (pág. 58)"],
+  "answer": "The sodium limit that triggers the warning label is 300 mg or more of sodium per 100 grams of product...",
+  "sources": ["2024-12-manual_normativa_original.pdf (p. 58)"],
   "session_id": "user-123"
 }
 ```
 
-### Evaluación RAGAS
+### RAGAS Evaluation
 
 ```bash
 python evaluate_ragas.py
 ```
 
-Genera un JSON con scores por pregunta y un reporte de métricas.
+Generates a JSON with per-question scores and a metrics report.
 
 ---
 
-## Resultados de Evaluación
+## Evaluation Results
 
-**Dataset:** 12 preguntas específicas sobre la normativa (ejemplos, umbrales, fórmulas).
+**Dataset:** 12 specific questions about the regulation (examples, thresholds, formulas).
 
-| Métrica | Score | Interpretación |
-|---------|-------|-----------------|
-| **Faithfulness** | 1.000 | ✅ Nunca alucina — todas las respuestas están respaldadas en el documento |
-| **Answer Relevancy** | 0.900 | ✅ Responde lo que se pregunta (90% de precisión) |
-| **Context Precision** | 0.685 | 🟡 68.5% de chunks recuperados son útiles |
-| **Overall** | **0.862** | 🟢 **PRODUCCIÓN** |
+| Metric | Score | Interpretation |
+|--------|-------|----------------|
+| **Faithfulness** | 1.000 | ✅ Never hallucinates — all answers are grounded in the document |
+| **Answer Relevancy** | 0.900 | ✅ Answers what is asked (90% precision) |
+| **Context Precision** | 0.685 | 🟡 68.5% of retrieved chunks are useful |
+| **Overall** | **0.862** | 🟢 **PRODUCTION** |
 
-### Ejemplos de rendimiento
+### Performance Examples
 
-✅ **Preguntas numéricas/fórmulas:**
-- "¿Cuál es la fórmula del ADS?" → Score 1.0 (responde exacto)
-- "¿A partir de qué % de azúcares?" → Score 1.0 (recupera bien)
+✅ **Numeric/formula questions:**
 
-✅ **Preguntas conceptuales:**
-- "¿Qué es un SPN?" → Score 1.0 (explica bien)
-- "¿Qué productos se exceptúan?" → Score 1.0 (lista completa)
+- "What is the ADS formula?" → Score 1.0 (exact answer)
+- "What percentage of added sugars triggers the label?" → Score 1.0 (retrieves correctly)
 
-⚠️ **Casos edge:**
-- Restricciones de publicidad → "No disponible en documentos" (honesto)
+✅ **Conceptual questions:**
+
+- "What is an SPN?" → Score 1.0 (explains well)
+- "Which products are exempt?" → Score 1.0 (complete list)
+
+⚠️ **Edge cases:**
+
+- Advertising restrictions → "Not available in documents" (honest)
 
 ---
 
-## Estructura del Proyecto
+## Project Structure
 
 ```
 rag-agent/
 ├── app/
 │   ├── main.py              # FastAPI app
 │   ├── agent_rag.py         # RAG pipeline (FAISS + Gemini)
-│   ├── retriever.py         # Indexing + reranking
+│   ├── retriever.py         # Multidocument indexing + reranking
 │   ├── memory.py            # Conversational memory
 │   └── auth.py              # JWT auth
-├── data/
-│   └── 2024-12-manual_normativa_original.pdf  # Documento fuente
+├── data/                    # Drop multiple PDFs here
+│   └── 2024-12-manual_normativa_original.pdf
 ├── evaluate_ragas.py        # RAGAS evaluation script
 ├── requirements.txt         # Dependencies
-├── .env.example            # Template for .env
-└── README.md               # Este archivo
+├── .env.example             # Environment template
+└── README.md                # This file
 ```
 
 ---
 
-## Configuración Recomendada
+## Recommended Configuration
 
-**Para desarrollo:**
+**Development:**
+
 ```bash
 python -m uvicorn app.main:app --reload --port 8000
 ```
 
-**Para producción (Cloud Run):**
+**Production (Cloud Run):**
+
 ```bash
 gcloud run deploy rag-agent --source . --region us-central1 --allow-unauthenticated
 ```
 
 ---
 
-## Variables de Entorno
+## Environment Variables
 
-```env
-# Gemini API (obtenida de https://aistudio.google.com)
+```bash
+# Gemini API (get at https://aistudio.google.com)
 GEMINI_API_KEY=your_key_here
 GEMINI_MODEL=gemini-3.1-flash-lite
 
 # RAGAS evaluation
 JUDGE_MODEL=gemini-3.1-flash-lite
 
-# JWT (cambiar en producción)
-JWT_SECRET_KEY=tu-clave-secreta-larga
+# JWT (change in production)
+JWT_SECRET_KEY=your-long-secret-key
 JWT_EXPIRE_MINUTES=60
 ```
 
 ---
 
-## Notas de Implementación
+## Implementation Notes
 
-### Embeddings locales (sin costo)
-- Modelo: `paraphrase-multilingual-MiniLM-L12-v2` (23MB)
-- Almacenamiento: FAISS en disco (`faiss_index/`)
-- Índice se reconstruye automáticamente si falta
+### Local Embeddings (zero cost)
+
+- Model: `paraphrase-multilingual-MiniLM-L12-v2` (23MB)
+- Storage: FAISS on disk (`faiss_index/`)
+- Index rebuilds automatically if missing
+
+### Multidocument Retrieval
+
+- Drop any number of PDFs into `data/`
+- `retriever.py` indexes all documents into a single FAISS vector store
+- Metadata tracks `source_file` per chunk so answers cite the correct document
+- Scales from 1 to N documents without code changes
 
 ### Reranking
-- Modelo: `ms-marco-TinyBERT-L-2-v2` (4MB, local)
-- Propósito: Reordenar chunks por relevancia (no filtrar)
-- No usa umbral porque TinyBERT comprime scores cerca de 1.0
 
-### Extracción de tablas
-- pdfplumber detecta tablas automáticamente
-- Convierte a markdown para mejor retrieval
-- Evita que las tablas se corten por CHUNK_SIZE
+- Model: `ms-marco-TinyBERT-L-2-v2` (4MB, local)
+- Purpose: Reorder chunks by relevance (not filter)
+- No threshold applied because TinyBERT compresses scores near 1.0
 
-### Prompt protector
-El SYSTEM_PROMPT incluye regla explícita:
-> "Cuando cites umbrales, porcentajes o límites numéricos, usá EXACTAMENTE la formulación del documento. NO la reformules ni la parafrasees."
+### Table Extraction
 
-Esto previene que el LLM reformule mal los números.
+- pdfplumber detects tables automatically
+- Converts to markdown for better retrieval
+- Prevents tables from being split by CHUNK_SIZE
 
----
+### Prompt Guard
 
-## Próximos Pasos
+The SYSTEM_PROMPT includes an explicit rule:
 
-- [ ] Deployar a Cloud Run
-- [ ] Agregar más documentos de normativa
-- [ ] Mejorar Context Precision a 0.75+
-- [ ] Implementar feedback loop (usuario valida respuestas)
-- [ ] Monitoreo en producción (logging de queries)
+> "When citing thresholds, percentages, or numeric limits, use EXACTLY the document's wording. DO NOT rephrase or paraphrase."
+
+This prevents the LLM from misstating numbers.
 
 ---
 
-## Créditos
+## Roadmap
 
-- **Evaluación RAGAS:** Framework de Langchain
-- **Prompt mejorado:** Colaboración con Kimi
-- **Retriever optimizado:** Balanceado entre CHUNK_SIZE, TOP_K, reranking
+- [ ] Deploy to Cloud Run
+- [ ] Add more regulatory documents (multidocument expansion)
+- [ ] Improve Context Precision to 0.75+
+- [ ] Implement feedback loop (user validates answers)
+- [ ] Production monitoring (query logging)
 
 ---
 
-## Licencia
+## Credits
+
+- **RAGAS Evaluation:** LangChain framework
+- **Prompt engineering:** Collaboration with Kimi
+- **Retriever optimization:** Balanced CHUNK_SIZE, TOP_K, and reranking
+
+---
+
+## License
 
 MIT
 
 ---
 
-## Contacto
+## Contact
 
 **GitHub:** https://github.com/bernytech25/rag-agent
 
@@ -246,9 +268,11 @@ MIT
 ## Changelog
 
 **v1.0** (2026-07-30)
-- ✅ RAG funcional con FAISS + Gemini
+
+- ✅ Functional RAG with FAISS + Gemini
 - ✅ RAGAS evaluation: 0.862 score
 - ✅ FastAPI deployed locally
-- ✅ pdfplumber para extracción de tablas
-- ✅ Prompt protector contra reformulación de números
-- ✅ GitHub push completo
+- ✅ pdfplumber for table extraction
+- ✅ Guard prompt against number rephrasing
+- ✅ Full GitHub push
+- ✅ Multidocument ingestion support
