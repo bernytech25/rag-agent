@@ -98,6 +98,7 @@ cp .env.example .env
 On Windows PowerShell, use `Copy-Item .env.example .env`. The service fails fast
 when `JWT_SECRET_KEY` or `RAG_USERS_JSON` are missing or invalid.
 
+
 ---
 
 ## Usage
