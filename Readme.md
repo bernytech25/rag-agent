@@ -1,8 +1,8 @@
 # 🤖 RAG Agent — Multidocument Nutritional Labeling (Argentina)
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Status-Production--Ready-success?style=for-the-badge" alt="Status: Production Ready">
-  <img src="https://img.shields.io/badge/RAGAS%20Score-0.862-blue?style=for-the-badge" alt="RAGAS Score: 0.862">
+  <img src="https://img.shields.io/badge/Status-Internal%20beta-yellow?style=for-the-badge" alt="Status: Internal beta">
+  <img src="https://img.shields.io/badge/LLM--Judge%20Score-0.862-blue?style=for-the-badge" alt="LLM-Judge Score: 0.862">
   <img src="https://img.shields.io/badge/Faithfulness-1.0-success?style=for-the-badge" alt="Faithfulness: 1.0">
 </p>
 
@@ -21,9 +21,8 @@
 - 🔍 Local retrieval (FAISS + HuggingFace embeddings, zero cloud costs)
 - 🧠 Generation via Gemini API (free tier, no credits required)
 - 📄 Multidocument ingestion — index and query across multiple PDFs simultaneously
-- 📊 Evaluated with RAGAS — Score: 0.862 (Faithfulness 1.0)
-- ⚡ FastAPI + Docker ready
-- 🎯 Production-ready
+- 📊 Initial evaluation with an LLM judge — score: 0.862 (not a production certification)
+- ⚡ FastAPI with local Docker build support
 
 ---
 
@@ -33,7 +32,7 @@
 flowchart TD
     A[User Query] --> B[FAISS Multidocument Retrieval]
     B -->|15 candidates| C[Flashrank Reranking]
-    C -->|Top 5 chunks| D[Gemini LLM Generation]
+    C -->|Top 3 chunks| D[Gemini LLM Generation]
     D --> E[Answer + Sources]
 
     subgraph Data Layer
@@ -62,7 +61,7 @@ flowchart TD
 | Table Extraction | pdfplumber |
 | LLM | Google Gemini API free tier (`gemini-3.1-flash-lite`) |
 | API | FastAPI |
-| Evaluation | RAGAS: Faithfulness, Answer Relevancy, Context Precision |
+| Evaluation | Custom LLM-as-a-judge: Faithfulness, Answer Relevancy, Context Precision |
 | Version Control | Git + GitHub |
 
 ---
@@ -91,15 +90,13 @@ source .venv/bin/activate
 # Install dependencies
 pip install -r requirements.txt
 
-# Create the environment file
-cat > .env <<'ENV'
-GEMINI_API_KEY=your-gemini-api-key
-GEMINI_MODEL=gemini-3.1-flash-lite
-JUDGE_MODEL=gemini-3.1-flash-lite
-JWT_SECRET_KEY=change-this-in-production
-JWT_EXPIRE_MINUTES=60
-ENV
+# Copy the template, fill in Gemini credentials, a 32+ character JWT secret,
+# and a bcrypt user hash. Never use default credentials.
+cp .env.example .env
 ```
+
+On Windows PowerShell, use `Copy-Item .env.example .env`. The service fails fast
+when `JWT_SECRET_KEY` or `RAG_USERS_JSON` are missing or invalid.
 
 ---
 
@@ -113,6 +110,16 @@ Start the local development server:
 python -m uvicorn app.main:app --reload
 ```
 
+Build the container explicitly with the lowercase build file currently tracked by
+this repository:
+
+```bash
+docker build -f dockerfile -t rag-agent .
+```
+
+For deployment, mount or create the versioned FAISS index before accepting
+traffic; it is intentionally excluded from the image as a generated artifact.
+
 Open the interactive API documentation at [http://localhost:8000/docs](http://localhost:8000/docs).
 
 #### Example: `POST /ask`
@@ -121,8 +128,8 @@ Request:
 
 ```json
 {
-  "question": "What is the sodium limit for the excess sodium warning label?",
-  "history": []
+  "session_id": "consulta-001",
+  "question": "What is the sodium limit for the excess sodium warning label?"
 }
 ```
 
@@ -141,14 +148,14 @@ Response:
 
 ## Evaluation
 
-The agent was evaluated with **RAGAS** using the following metrics:
+The agent has an initial **custom LLM-as-a-judge** evaluation using the following metrics:
 
 - **Faithfulness:** 1.0
 - **Answer Relevancy**
 - **Context Precision**
 - **Overall score:** 0.862
 
-The overall RAGAS score of **0.862** reflects the combined evaluation results across the tested questions and contexts. **No threshold applied because TinyBERT compresses scores near 1.0.**
+The overall score of **0.862** is a diagnostic baseline across the tested questions and contexts. It is not RAGAS and it does not certify production readiness. **No threshold is applied because TinyBERT compresses scores near 1.0.**
 
 ---
 

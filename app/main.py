@@ -13,16 +13,18 @@ Endpoints protegidos:
   DELETE /memory/{id} → limpiar historial
 """
 
-import os
+import logging
 from typing import Annotated
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.security import OAuth2PasswordRequestForm
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.agent_rag import run_rag
 from app.memory import in_session_memory, persistent_memory
 from app.retriever import add_documents, index_exists
-from app.auth import Token, User, authenticate_user, create_access_token, get_current_user, ACCESS_TOKEN_EXPIRE_MINUTES
+from app.auth import Token, User, authenticate_user, create_access_token, get_current_user, require_admin, ACCESS_TOKEN_EXPIRE_MINUTES
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="RAG Agent API",
@@ -31,8 +33,8 @@ app = FastAPI(
 )
 
 class AskRequest(BaseModel):
-    session_id: str
-    question: str
+    session_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")
+    question: str = Field(min_length=1, max_length=4000)
     model_config = {"json_schema_extra": {"example": {"session_id": "user-123", "question": "What is the passing score?"}}}
 
 class AskResponse(BaseModel):
@@ -42,7 +44,12 @@ class AskResponse(BaseModel):
     sources: list[str]
 
 class IndexRequest(BaseModel):
-    pdf_paths: list[str]
+    pdf_paths: list[str] = Field(min_length=1, max_length=20)
+
+
+def _memory_key(user: User, session_id: str) -> str:
+    """Namespace client-chosen IDs so one user cannot access another's history."""
+    return f"{user.username}:{session_id}"
 
 @app.get("/", tags=["Health"])
 def health():
@@ -57,47 +64,52 @@ def login(form_data: Annotated[OAuth2PasswordRequestForm, Depends()]):
 
 @app.post("/ask", response_model=AskResponse, tags=["RAG - In-Session"])
 def ask(request: AskRequest, current_user: Annotated[User, Depends(get_current_user)]):
-    if not request.question.strip():
-        raise HTTPException(status_code=400, detail="La pregunta no puede estar vacía.")
-    history = in_session_memory.get_history(request.session_id)
+    memory_key = _memory_key(current_user, request.session_id)
+    history = in_session_memory.get_history(memory_key)
     try:
         result = run_rag(question=request.question, history=history)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    in_session_memory.add_message(request.session_id, "user", request.question)
-    in_session_memory.add_message(request.session_id, "assistant", result["answer"])
+    except Exception:
+        logger.exception("RAG request failed", extra={"user": current_user.username})
+        raise HTTPException(status_code=503, detail="El servicio de respuestas no está disponible temporalmente.")
+    in_session_memory.add_message(memory_key, "user", request.question)
+    in_session_memory.add_message(memory_key, "assistant", result["answer"])
     return AskResponse(session_id=request.session_id, question=request.question, answer=result["answer"], sources=result["sources"])
 
 @app.post("/ask/persistent", response_model=AskResponse, tags=["RAG - Persistente"])
 def ask_persistent(request: AskRequest, current_user: Annotated[User, Depends(get_current_user)]):
-    if not request.question.strip():
-        raise HTTPException(status_code=400, detail="La pregunta no puede estar vacía.")
-    history = persistent_memory.get_history(request.session_id)
+    memory_key = _memory_key(current_user, request.session_id)
+    history = persistent_memory.get_history(memory_key)
     try:
         result = run_rag(question=request.question, history=history)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    persistent_memory.add_message(request.session_id, "user", request.question)
-    persistent_memory.add_message(request.session_id, "assistant", result["answer"])
+    except Exception:
+        logger.exception("Persistent RAG request failed", extra={"user": current_user.username})
+        raise HTTPException(status_code=503, detail="El servicio de respuestas no está disponible temporalmente.")
+    persistent_memory.add_message(memory_key, "user", request.question)
+    persistent_memory.add_message(memory_key, "assistant", result["answer"])
     return AskResponse(session_id=request.session_id, question=request.question, answer=result["answer"], sources=result["sources"])
 
 @app.post("/index", tags=["Admin"])
-def index_documents(request: IndexRequest, current_user: Annotated[User, Depends(get_current_user)]):
+def index_documents(request: IndexRequest, current_user: Annotated[User, Depends(require_admin)]):
     try:
         add_documents(request.pdf_paths)
-        return {"status": "ok", "indexed": len(request.pdf_paths)}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        return {"status": "ok", "requested": len(request.pdf_paths)}
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception:
+        logger.exception("Indexing failed", extra={"user": current_user.username})
+        raise HTTPException(status_code=500, detail="No se pudo actualizar el índice.")
 
 @app.get("/memory/{session_id}", tags=["Memoria"])
 def get_memory(session_id: str, current_user: Annotated[User, Depends(get_current_user)], persistent: bool = False):
-    history = persistent_memory.get_history_with_timestamps(session_id) if persistent else in_session_memory.get_history(session_id)
+    memory_key = _memory_key(current_user, session_id)
+    history = persistent_memory.get_history_with_timestamps(memory_key) if persistent else in_session_memory.get_history(memory_key)
     return {"session_id": session_id, "messages": history, "total": len(history)}
 
 @app.delete("/memory/{session_id}", tags=["Memoria"])
 def clear_memory(session_id: str, current_user: Annotated[User, Depends(get_current_user)], persistent: bool = False):
+    memory_key = _memory_key(current_user, session_id)
     if persistent:
-        persistent_memory.clear(session_id)
+        persistent_memory.clear(memory_key)
     else:
-        in_session_memory.clear(session_id)
+        in_session_memory.clear(memory_key)
     return {"status": "cleared", "session_id": session_id}

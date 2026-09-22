@@ -15,6 +15,8 @@ resultados porque está entrenado en inglés (MS MARCO) y no discrimina bien en 
 """
 
 import os
+import hashlib
+import threading
 from pathlib import Path
 import pdfplumber
 from langchain_community.document_loaders import PyPDFLoader
@@ -23,7 +25,9 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
 
-FAISS_INDEX_PATH = "faiss_index"
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DATA_DIR = PROJECT_ROOT / "data"
+FAISS_INDEX_PATH = str(PROJECT_ROOT / "faiss_index")
 EMBEDDINGS_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 CHUNK_SIZE = 800          # Punto medio entre 600 (muy chico) y 1000 (muy grande)
 CHUNK_OVERLAP = 200       # Overlap un poco mayor para mantener coherencia
@@ -32,6 +36,7 @@ TOP_K_FINAL = 5           # Máximo de chunks a devolver tras reranking
 
 _embeddings_cache = None
 _ranker_cache = None
+_index_lock = threading.RLock()
 
 
 def _table_to_markdown(table):
@@ -52,7 +57,7 @@ def _table_to_markdown(table):
     return "\n".join(lines)
 
 
-def _extract_tables_from_pdf(pdf_path, source_name):
+def _extract_tables_from_pdf(pdf_path, source_name, source_sha256):
     """
     Extrae tablas de un PDF usando pdfplumber y devuelve chunks de tabla.
     Cada tabla se guarda como un chunk separado para no cortarla.
@@ -72,7 +77,8 @@ def _extract_tables_from_pdf(pdf_path, source_name):
                                 metadata={
                                     "source_file": source_name,
                                     "page": page_num,
-                                    "type": "table"
+                                    "type": "table",
+                                    "source_sha256": source_sha256,
                                 }
                             )
                             table_chunks.append(doc)
@@ -100,36 +106,70 @@ def _get_ranker():
 
 
 def index_exists():
-    return os.path.exists(FAISS_INDEX_PATH)
+    index_path = Path(FAISS_INDEX_PATH)
+    return (index_path / "index.faiss").is_file() and (index_path / "index.pkl").is_file()
 
 
 def load_index():
-    return FAISS.load_local(FAISS_INDEX_PATH, _get_embeddings(), allow_dangerous_deserialization=True)
+    # Index writes are serialized in-process; loading under the same lock avoids
+    # reading one of FAISS's two persistence files while it is being replaced.
+    with _index_lock:
+        return FAISS.load_local(FAISS_INDEX_PATH, _get_embeddings(), allow_dangerous_deserialization=True)
+
+
+def _validated_pdf_paths(pdf_paths: list) -> list[Path]:
+    """Only ingest PDFs already placed under data/, never arbitrary filesystem paths."""
+    data_root = DATA_DIR.resolve()
+    validated = []
+    for raw_path in pdf_paths:
+        candidate = Path(raw_path).resolve()
+        try:
+            candidate.relative_to(data_root)
+        except ValueError as exc:
+            raise ValueError("Los documentos deben estar dentro de data/.") from exc
+        if candidate.suffix.lower() != ".pdf":
+            raise ValueError(f"Solo se permiten PDF: {candidate.name}")
+        if not candidate.is_file():
+            raise FileNotFoundError(f"No encontrado: {candidate.name}")
+        validated.append(candidate)
+    if not validated:
+        raise ValueError("No se recibieron PDFs válidos.")
+    return validated
+
+
+def _sha256(file_path: Path) -> str:
+    digest = hashlib.sha256()
+    with file_path.open("rb") as file:
+        for block in iter(lambda: file.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _load_pdf_documents(pdf_path: Path) -> tuple[list, list]:
+    source_name = pdf_path.name
+    source_sha256 = _sha256(pdf_path)
+    print(f"Indexando: {source_name}")
+    documents = PyPDFLoader(str(pdf_path)).load()
+    for doc in documents:
+        # PyPDFLoader stores its page index from zero; API citations use human page numbers.
+        page = doc.metadata.get("page")
+        if isinstance(page, int):
+            doc.metadata["page"] = page + 1
+        doc.metadata.update({"source_file": source_name, "source_sha256": source_sha256, "type": "text"})
+    table_docs = _extract_tables_from_pdf(str(pdf_path), source_name, source_sha256)
+    print(f"  → Texto: {len(documents)} páginas, Tablas: {len(table_docs)}")
+    return documents, table_docs
 
 
 def create_index(pdf_paths: list):
+    pdf_paths = _validated_pdf_paths(pdf_paths)
     all_text_docs = []
     all_table_docs = []
 
     for pdf_path in pdf_paths:
-        if not os.path.exists(pdf_path):
-            print(f"No encontrado: {pdf_path}")
-            continue
-
-        source_name = Path(pdf_path).name
-        print(f"Indexando: {source_name}")
-
-        # 1. Extraer texto con PyPDFLoader
-        loader = PyPDFLoader(pdf_path)
-        documents = loader.load()
-        for doc in documents:
-            doc.metadata["source_file"] = source_name
+        documents, table_docs = _load_pdf_documents(pdf_path)
         all_text_docs.extend(documents)
-
-        # 2. Extraer tablas con pdfplumber (como chunks separados, NO se re-chunkean)
-        table_docs = _extract_tables_from_pdf(pdf_path, source_name)
         all_table_docs.extend(table_docs)
-        print(f"  → Texto: {len(documents)} páginas, Tablas: {len(table_docs)}")
 
     if not all_text_docs and not all_table_docs:
         raise ValueError("No se encontraron documentos.")
@@ -148,41 +188,50 @@ def create_index(pdf_paths: list):
     return vectorstore
 
 
-def add_documents(pdf_paths: list):
+def _add_documents_unlocked(pdf_paths: list):
+    pdf_paths = _validated_pdf_paths(pdf_paths)
     if not index_exists():
-        return create_index(pdf_paths)
+        return create_index([str(path) for path in pdf_paths])
 
     existing = load_index()
+    existing_hashes = {
+        document.metadata.get("source_sha256")
+        for document in existing.docstore._dict.values()
+        if document.metadata.get("source_sha256")
+    }
+    existing_names = {
+        document.metadata.get("source_file")
+        for document in existing.docstore._dict.values()
+        if document.metadata.get("source_file")
+    }
     all_text_docs = []
     all_table_docs = []
 
     for pdf_path in pdf_paths:
-        if not os.path.exists(pdf_path):
+        source_hash = _sha256(pdf_path)
+        if source_hash in existing_hashes or pdf_path.name in existing_names:
+            print(f"Omitido (ya indexado): {pdf_path.name}")
             continue
-
-        source_name = Path(pdf_path).name
-        print(f"Agregando: {source_name}")
-
-        # 1. Extraer texto
-        loader = PyPDFLoader(pdf_path)
-        documents = loader.load()
-        for doc in documents:
-            doc.metadata["source_file"] = source_name
+        documents, table_docs = _load_pdf_documents(pdf_path)
         all_text_docs.extend(documents)
-
-        # 2. Extraer tablas (sin re-chunkear)
-        table_docs = _extract_tables_from_pdf(pdf_path, source_name)
         all_table_docs.extend(table_docs)
-        print(f"  → Texto: {len(documents)} páginas, Tablas: {len(table_docs)}")
 
     splitter = RecursiveCharacterTextSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP)
     text_chunks = splitter.split_documents(all_text_docs)
 
     chunks = text_chunks + all_table_docs
+    if not chunks:
+        raise ValueError("Todos los documentos recibidos ya estaban indexados.")
     existing.add_documents(chunks)
     existing.save_local(FAISS_INDEX_PATH)
     print(f"{len(chunks)} fragmentos agregados (texto: {len(text_chunks)}, tablas: {len(all_table_docs)})")
     return existing
+
+
+def add_documents(pdf_paths: list):
+    """Serialize index mutations within this API process."""
+    with _index_lock:
+        return _add_documents_unlocked(pdf_paths)
 
 
 def rerank_documents(query: str, docs: list, top_k: int = TOP_K_FINAL) -> list:
@@ -224,10 +273,12 @@ def get_retriever_with_reranking(query: str, top_k: int = TOP_K_FINAL) -> list:
     3. Retorna los mejores top_k chunks
     """
     if not index_exists():
-        pdf_files = list(Path("data").glob("*.pdf"))
+        pdf_files = list(DATA_DIR.glob("*.pdf"))
         if not pdf_files:
             raise FileNotFoundError("No hay indice ni PDFs en data/.")
-        create_index([str(p) for p in pdf_files])
+        with _index_lock:
+            if not index_exists():
+                create_index([str(p) for p in pdf_files])
 
     vectorstore = load_index()
     candidates = vectorstore.similarity_search(query, k=FAISS_CANDIDATES)
@@ -237,10 +288,12 @@ def get_retriever_with_reranking(query: str, top_k: int = TOP_K_FINAL) -> list:
 def get_retriever(top_k: int = TOP_K_FINAL):
     """Retriever sin reranking - mantenido para compatibilidad."""
     if not index_exists():
-        pdf_files = list(Path("data").glob("*.pdf"))
+        pdf_files = list(DATA_DIR.glob("*.pdf"))
         if not pdf_files:
             raise FileNotFoundError("No hay indice ni PDFs en data/.")
-        create_index([str(p) for p in pdf_files])
+        with _index_lock:
+            if not index_exists():
+                create_index([str(p) for p in pdf_files])
 
     vectorstore = load_index()
     return vectorstore.as_retriever(search_kwargs={"k": top_k})
