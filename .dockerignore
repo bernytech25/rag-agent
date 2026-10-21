@@ -1,6 +1,11 @@
 venv
+.venv*/
+.pytest_cache/
+.git/
 __pycache__
 *.pyc
 .env
 faiss_index
 data/memory.json
+data/*.sqlite3*
+corpora/

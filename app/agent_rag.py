@@ -1,116 +1,69 @@
-"""
-Agente RAG con memoria conversacional y reranking.
-Pipeline: Pregunta -> FAISS (10 candidatos, embeddings locales) -> Flashrank reordena -> top 3 -> Gemini (API key)
-
-LLM: Gemini vía API key (google.generativeai), la misma GEMINI_API_KEY que usa evaluate_ragas.py.
-No requiere proyecto de GCP ni gcloud auth. Los embeddings de retriever.py siguen locales
-(HuggingFace) para no gastar tokens/creditos en la etapa de recuperacion.
-"""
-
+"""Generation uses the selected corpus's retrieval tool and own generation profile."""
+import hashlib
 import os
-from dotenv import load_dotenv
+from copy import deepcopy
 from google import genai
-from app.retriever import get_retriever_with_reranking
+from google.genai import types
+from app.corpus import get_corpus_profile
+from app.grounding import build_retrieval_query
+from app.answer_contract import ANSWER_SCHEMA, render_structured_answer
+from app.tools import CorpusRetrievalTool
 
-load_dotenv()
-
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL")
-
-if not GEMINI_API_KEY:
-    raise RuntimeError("Falta GEMINI_API_KEY en el .env")
-if not GEMINI_MODEL:
-    raise RuntimeError("Falta GEMINI_MODEL en el .env (ej: gemini-3.1-flash-lite)")
-
-client = genai.Client(api_key=GEMINI_API_KEY)
-
-SYSTEM_PROMPT = r"""Sos un asistente experto que responde preguntas basándote ÚNICAMENTE
-en los documentos proporcionados como contexto.
-
-REGLAS:
-- Usá SOLO la información del contexto para responder
-- Si la información no está en el contexto, decí exactamente:
-  "La información no está disponible en los documentos."
-- Citá siempre el archivo fuente y la página cuando estén disponibles
-- Si hay preguntas de seguimiento, usá el historial de conversación
-- Respondé en el mismo idioma en que se hace la pregunta
-- Para umbrales numéricos, citá textualmente el valor del documento
-  sin agregar interpretaciones propias (ej: si dice ≥ 10%, no digas
-  10% de algo diferente)
-"""
+if not os.getenv("GEMINI_API_KEY"):
+    raise RuntimeError("Falta GEMINI_API_KEY en .env")
+client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
 
 
-
-MAX_HISTORY = 10
-
-
-def _truncate_history(history: list) -> list:
-    if len(history) <= MAX_HISTORY:
-        return history
-    return history[-MAX_HISTORY:]
-
-
-def _build_gemini_prompt(system_prompt: str, history: list, question_block: str) -> str:
-    """
-    google.generativeai no usa el formato de mensajes de LangChain; arma un solo
-    prompt de texto con el system prompt, el historial y la pregunta+contexto.
-    """
-    parts = [system_prompt]
-    for msg in history:
-        role = "Usuario" if msg["role"] == "user" else "Asistente"
-        parts.append(f"{role}: {msg['content']}")
-    parts.append(question_block)
-    return "\n\n".join(parts)
+def limit_context(evidence: list[dict], max_context_chars: int) -> list[dict]:
+    """Keep whole evidence fragments, in retrieval order, within a corpus budget."""
+    selected, used = [], 0
+    for item in evidence:
+        size = len(item["content"])
+        if selected and used + size > max_context_chars:
+            continue
+        if not selected and size > max_context_chars:
+            raise ValueError("El primer fragmento supera max_context_chars del perfil.")
+        selected.append(item)
+        used += size
+    return selected
 
 
-def run_rag(question: str, history: list = None) -> dict:
-    """
-    Pipeline RAG completo con reranking.
-
-    Args:
-        question: Pregunta del usuario
-        history: Historial de conversación
-
-    Returns:
-        dict con answer, sources y contexts (para evaluación)
-    """
-    history = history or []
-    history = _truncate_history(history)
-
-    # 1. Recuperar y rerankear documentos (local, no consume tokens)
-    docs = get_retriever_with_reranking(question, top_k=3)
-
-    # 2. Construir contexto con metadata y rerank score
-    context_parts = []
-    sources = []
-    raw_contexts = []
-    for doc in docs:
-        source_file = doc.metadata.get("source_file", "Documento desconocido")
-        page = doc.metadata.get("page", "N/A")
-        score = doc.metadata.get("rerank_score", "N/A")
-        context_parts.append(
-            f"[Fuente: {source_file} | Página: {page} | Relevancia: {score}]\n{doc.page_content}"
-        )
-        raw_contexts.append(doc.page_content)
-        source_key = f"{source_file} (pág. {page})"
-        if source_key not in sources:
-            sources.append(source_key)
-
-    context = "\n\n---\n\n".join(context_parts)
-
-    # 3. Armar el prompt (pregunta + contexto + historial)
-    question_block = f"Contexto:\n{context}\n\nPregunta: {question}"
-    prompt = _build_gemini_prompt(SYSTEM_PROMPT, history, question_block)
-
-    # 4. Llamar a Gemini (una sola llamada por pregunta)
+def run_rag(question: str, history: list = None, corpus_id: str | None = None) -> dict:
+    profile = get_corpus_profile(corpus_id)
+    generation = profile.generation
+    system_prompt = generation.read_prompt()
+    history = (history or [])[-generation.max_history:]
+    query = build_retrieval_query(question, history)
+    evidence = limit_context(CorpusRetrievalTool(profile).retrieve(query), profile.max_context_chars)
+    contexts = [item["content"] for item in evidence]
+    context = "\n\n---\n\n".join(
+        f"[EVIDENCIA id={item['chunk_id']} | Fuente: {item['source_file']} | Página: {item['page']}]\n{item['content']}"
+        for item in evidence)
+    contents = [types.Content(role="user" if message["role"] == "user" else "model",
+                              parts=[types.Part.from_text(text=message["content"])]) for message in history]
+    contents.append(types.Content(role="user", parts=[types.Part.from_text(text=f"Contexto:\n{context}\n\nPregunta: {question}")]))
     response = client.models.generate_content(
-        model=GEMINI_MODEL,
-        contents=prompt,
-        config={"temperature": 0},
-    )
-
+        model=generation.model, contents=contents,
+        config={"system_instruction": system_prompt, "temperature": generation.temperature,
+                "max_output_tokens": generation.max_output_tokens,
+                "response_mime_type": "application/json", "response_schema": deepcopy(ANSWER_SCHEMA)})
+    if any(str(getattr(candidate, "finish_reason", "")).endswith("MAX_TOKENS")
+           for candidate in (getattr(response, "candidates", None) or [])):
+        raise RuntimeError("La respuesta alcanzó el límite de salida; no se entrega una respuesta truncada.")
+    if not response.text or not response.text.strip():
+        raise RuntimeError("El proveedor devolvió una respuesta vacía.")
+    answer, citations, status = render_structured_answer(response.text, evidence)
     return {
-        "answer": response.text,
-        "sources": sources,
-        "contexts": raw_contexts,
+        "corpus_id": profile.corpus_id, "answer": answer,
+        "sources": list(dict.fromkeys(f"{item['source_file']} (pág. {item['page']})" for item in citations)),
+        "contexts": contexts, "citations": citations, "retrieval_query": query,
+        "answer_status": status,
+        "execution": {"profile_version": profile.profile_version, "index_version": profile.index_version,
+                      "retrieval_signature": profile.retrieval_signature(),
+                      "ingestion_signature": profile.ingestion_signature(),
+                      "prompt_version": generation.prompt_version,
+                      "prompt_sha256": hashlib.sha256(system_prompt.encode()).hexdigest(),
+                      "answer_contract_version": 1,
+                      "model": generation.model, "temperature": generation.temperature,
+                      "max_output_tokens": generation.max_output_tokens},
     }

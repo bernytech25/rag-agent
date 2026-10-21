@@ -1,0 +1,34 @@
+﻿{
+    "corpus_id":  "rotulado-v1",
+    "description":  "Normativa argentina de rotulado frontal",
+    "embedding_model":  "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+    "chunk_size":  800,
+    "chunk_overlap":  200,
+    "ingestion": {"version": 1, "parser": "pdf_text_tables"},
+    "generation": {
+        "prompt": "prompts/answer.v2.txt",
+        "prompt_version": 2,
+        "max_output_tokens": 2048,
+        "model_env": "GEMINI_MODEL",
+        "temperature": 0,
+        "max_history": 10,
+        "evaluation_status": "pending"
+    },
+    "retrieval": {
+                      "profile_version": 2,
+                      "faiss_candidates": 15,
+                      "bm25_candidates": 15,
+                      "rrf_k": 60,
+                      "rerank_model": "ms-marco-TinyBERT-L-2-v2",
+                      "top_k": 4,
+                      "max_context_chars": 20000,
+                      "neighbor_chunks": 2
+                  },
+    "status":  "active_pending_evaluation",
+    "documents":  [
+                      {
+                          "file":  "2024-12-manual_normativa_original.pdf",
+                          "sha256":  "cb8f55b34b02199746f7f69aab1c7070236394d67e48c5850d1c0566e50b929a"
+                      }
+                  ]
+}

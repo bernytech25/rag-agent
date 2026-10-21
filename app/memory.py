@@ -1,72 +1,54 @@
-import json
-import os
-import threading
-import tempfile
-from pathlib import Path
-from datetime import datetime
+"""Per-conversation coordination and transactionally persisted turns."""
+from datetime import datetime, timezone
+from app.corpus import MEMORY_FILE, get_corpus_profile
+from app.concurrency import KeyedLocks
+from app.sql_memory import SQLMemory, ConversationConflict, MAX_MESSAGES_PER_SESSION
 
-MEMORY_FILE = Path(__file__).parent.parent / "data" / "memory.json"
-MAX_MESSAGES_PER_SESSION = 50
-_memory_lock = threading.RLock()
 
 class InSessionMemory:
     def __init__(self):
         self._sessions = {}
+        self._revisions = {}
+        self._locks = KeyedLocks()
 
-    def add_message(self, session_id, role, content):
-        if session_id not in self._sessions:
-            self._sessions[session_id] = []
-        self._sessions[session_id].append({"role": role, "content": content, "timestamp": datetime.now().isoformat()})
-        self._sessions[session_id] = self._sessions[session_id][-MAX_MESSAGES_PER_SESSION:]
+    def turn_scope(self, session_id, corpus_id=None):
+        return self._locks.hold(session_id)
 
-    def get_history(self, session_id):
-        return [{"role": m["role"], "content": m["content"]} for m in self._sessions.get(session_id, [])]
+    def get_revision(self, session_id, corpus_id=None):
+        return self._revisions.get(session_id, 0)
 
-    def clear(self, session_id):
-        self._sessions.pop(session_id, None)
+    def add_message(self, session_id, role, content, corpus_id=None):
+        with self.turn_scope(session_id):
+            messages = self._sessions.setdefault(session_id, [])
+            messages.append({"role": role, "content": content, "timestamp": datetime.now(timezone.utc).isoformat()})
+            self._sessions[session_id] = messages[-MAX_MESSAGES_PER_SESSION:]
+            self._revisions[session_id] = self.get_revision(session_id) + 1
 
-class PersistentMemory:
-    def _load(self):
-        with _memory_lock:
-            if not MEMORY_FILE.exists():
-                return {}
-            with open(MEMORY_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
+    def append_turn(self, session_id, question, answer, corpus_id=None, expected_revision=None):
+        with self.turn_scope(session_id):
+            if expected_revision is not None and self.get_revision(session_id) != expected_revision:
+                raise ConversationConflict("La conversación cambió; repetí la consulta.")
+            self.add_message(session_id, "user", question)
+            self.add_message(session_id, "assistant", answer)
 
-    def _save(self, data):
-        with _memory_lock:
-            MEMORY_FILE.parent.mkdir(parents=True, exist_ok=True)
-            fd, temporary_path = tempfile.mkstemp(dir=MEMORY_FILE.parent, suffix=".tmp")
-            try:
-                with os.fdopen(fd, "w", encoding="utf-8") as f:
-                    json.dump(data, f, ensure_ascii=False, indent=2)
-                os.replace(temporary_path, MEMORY_FILE)
-            except Exception:
-                if os.path.exists(temporary_path):
-                    os.unlink(temporary_path)
-                raise
+    def get_history(self, session_id, corpus_id=None):
+        with self.turn_scope(session_id):
+            return [{"role": m["role"], "content": m["content"]} for m in self._sessions.get(session_id, [])]
 
-    def add_message(self, session_id, role, content):
-        with _memory_lock:
-            data = self._load()
-            if session_id not in data:
-                data[session_id] = []
-            data[session_id].append({"role": role, "content": content, "timestamp": datetime.now().isoformat()})
-            data[session_id] = data[session_id][-MAX_MESSAGES_PER_SESSION:]
-            self._save(data)
+    def get_history_with_timestamps(self, session_id, corpus_id=None):
+        with self.turn_scope(session_id):
+            return [dict(m) for m in self._sessions.get(session_id, [])]
 
-    def get_history(self, session_id):
-        data = self._load()
-        return [{"role": m["role"], "content": m["content"]} for m in data.get(session_id, [])]
+    def clear(self, session_id, corpus_id=None):
+        with self.turn_scope(session_id):
+            self._sessions.pop(session_id, None)
+            self._revisions[session_id] = self.get_revision(session_id) + 1
 
-    def get_history_with_timestamps(self, session_id):
-        return self._load().get(session_id, [])
 
-    def clear(self, session_id):
-        with _memory_lock:
-            data = self._load()
-            data.pop(session_id, None)
-            self._save(data)
+class PersistentMemory(SQLMemory):
+    def __init__(self, database_url=None):
+        super().__init__(database_url, lambda cid: get_corpus_profile(cid).memory_file if cid else MEMORY_FILE)
+
 
 in_session_memory = InSessionMemory()
 persistent_memory = PersistentMemory()

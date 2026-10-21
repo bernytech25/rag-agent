@@ -1,0 +1,3 @@
+-r requirements.txt
+# Required only for a PostgreSQL deployment. Local SQLite needs no server.
+psycopg[binary]>=3.2,<4

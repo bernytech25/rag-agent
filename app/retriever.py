@@ -1,299 +1,258 @@
-"""
-Capa de recuperación con Reranking.
-Pipeline: Pregunta -> FAISS (15 candidatos) -> Flashrank reordena -> top_k -> LLM
-
-Los embeddings se mantienen 100% locales (HuggingFace + FAISS en disco) a propósito:
-no consumen tokens ni créditos de la nube. Solo la generación final (agent_rag.py)
-llama a un modelo pago (Vertex AI Gemini).
-
-NOTA SOBRE RERANKING:
-Flashrank usa por defecto ms-marco-TinyBERT-L-2-v2 (~4MB). Este modelo comprime
-los scores cerca de 1.0, por lo que NO es confiable para filtrar por umbral absoluto.
-Su valor real está en REORDENAR los candidatos de FAISS, no en descartar por score.
-Se probó ms-marco-MiniLM-L-12-v2 (modelo más grande, ~23MB) pero empeoró los
-resultados porque está entrenado en inglés (MS MARCO) y no discrimina bien en español.
-"""
-
+"""Per-corpus hybrid retrieval; versioned candidates and bounded index cache."""
+from collections import OrderedDict
+from dataclasses import replace
+import json
+import logging
 import os
-import hashlib
 import threading
-from pathlib import Path
-import pdfplumber
-from langchain_community.document_loaders import PyPDFLoader
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+from app import runtime_config  # Also covers CLI imports bypassing the API.
+import huggingface_hub
+from app.vectorstore import FAISS
+from langchain_core.embeddings import Embeddings
 from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_community.vectorstores import FAISS
-from langchain_core.documents import Document
+from app.concurrency import KeyedLocks
+from app.corpus import get_corpus_profile
+from app.hybrid import bm25_search, rrf_fuse, retain_explicit_references
+from app.index_versions import corpus_write_lock, write_candidate
+from app.ingestion import ingest, validated_pdf_paths, sha256
+from app.grounding import chunk_id
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DATA_DIR = PROJECT_ROOT / "data"
-FAISS_INDEX_PATH = str(PROJECT_ROOT / "faiss_index")
-EMBEDDINGS_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-CHUNK_SIZE = 800          # Punto medio entre 600 (muy chico) y 1000 (muy grande)
-CHUNK_OVERLAP = 200       # Overlap un poco mayor para mantener coherencia
-FAISS_CANDIDATES = 15     # Recupera 15 candidatos con FAISS para dar margen al reranker
-TOP_K_FINAL = 5           # Máximo de chunks a devolver tras reranking
-
-_embeddings_cache = None
-_ranker_cache = None
-_index_lock = threading.RLock()
-
-
-def _table_to_markdown(table):
-    """Convierte una tabla extraída por pdfplumber a formato markdown."""
-    if not table:
-        return None
-
-    lines = []
-    for i, row in enumerate(table):
-        # Convertir None a string vacío
-        row = [str(cell) if cell is not None else "" for cell in row]
-        lines.append("| " + " | ".join(row) + " |")
-
-        # Agregar separador después del encabezado (primera fila)
-        if i == 0:
-            lines.append("|" + "|".join(["---"] * len(row)) + "|")
-
-    return "\n".join(lines)
+logger = logging.getLogger(__name__)
+TOP_K_FINAL = 5
+_embeddings_cache = {}
+_ranker_cache = {}
+_index_cache = OrderedDict()
+_cache_guard = threading.Lock()
+_resource_locks = KeyedLocks()
 
 
-def _extract_tables_from_pdf(pdf_path, source_name, source_sha256):
-    """
-    Extrae tablas de un PDF usando pdfplumber y devuelve chunks de tabla.
-    Cada tabla se guarda como un chunk separado para no cortarla.
-    """
-    table_chunks = []
+def embeddings_offline_enabled():
+    """Whether embedding model resolution must be limited to the local cache."""
+    return os.getenv("EMBEDDINGS_OFFLINE", "1") == "1"
 
+
+def verify_embeddings_available(model_name):
+    """Fail early when an offline embedding model is absent from the local cache."""
+    if not embeddings_offline_enabled():
+        return
     try:
-        with pdfplumber.open(pdf_path) as pdf:
-            for page_num, page in enumerate(pdf.pages, start=1):
-                tables = page.extract_tables()
-                if tables:
-                    for table_idx, table in enumerate(tables):
-                        markdown_table = _table_to_markdown(table)
-                        if markdown_table:
-                            doc = Document(
-                                page_content=f"Tabla {table_idx + 1} (página {page_num}):\n\n{markdown_table}",
-                                metadata={
-                                    "source_file": source_name,
-                                    "page": page_num,
-                                    "type": "table",
-                                    "source_sha256": source_sha256,
-                                }
-                            )
-                            table_chunks.append(doc)
-    except Exception as e:
-        print(f"Error extrayendo tablas de {pdf_path}: {e}")
-
-    return table_chunks
+        huggingface_hub.snapshot_download(repo_id=model_name, local_files_only=True)
+    except Exception as exc:
+        raise RuntimeError(
+            f"El modelo de embeddings '{model_name}' no está disponible en la caché local. "
+            "EMBEDDINGS_OFFLINE=1 no intenta descargar modelos. "
+            "Descargá y validá el modelo durante el aprovisionamiento, o configurá "
+            "EMBEDDINGS_OFFLINE=0 temporalmente en un entorno autorizado con red."
+        ) from exc
 
 
-def _get_embeddings():
-    # Cacheado para no recargar el modelo local en cada llamada
-    global _embeddings_cache
-    if _embeddings_cache is None:
-        _embeddings_cache = HuggingFaceEmbeddings(model_name=EMBEDDINGS_MODEL)
-    return _embeddings_cache
+def _get_embeddings(model_name):
+    with _resource_locks.hold(("embeddings", model_name)):
+        if model_name not in _embeddings_cache:
+            kwargs = {"model_kwargs": {"local_files_only": True}} if embeddings_offline_enabled() else {}
+            _embeddings_cache[model_name] = HuggingFaceEmbeddings(model_name=model_name, **kwargs)
+        return _embeddings_cache[model_name]
 
 
-def _get_ranker():
-    """Cachea el ranker de Flashrank para no recargarlo en cada consulta."""
-    global _ranker_cache
-    if _ranker_cache is None:
-        from flashrank import Ranker
-        _ranker_cache = Ranker()  # Default: ms-marco-TinyBERT-L-2-v2
-    return _ranker_cache
+class _LazyEmbeddings(Embeddings):
+    """Opening an index does not download its model until an embedding is needed."""
+    def __init__(self, model_name):
+        self.model_name = model_name
+
+    def embed_documents(self, texts):
+        return _get_embeddings(self.model_name).embed_documents(texts)
+
+    def embed_query(self, text):
+        return _get_embeddings(self.model_name).embed_query(text)
 
 
-def index_exists():
-    index_path = Path(FAISS_INDEX_PATH)
-    return (index_path / "index.faiss").is_file() and (index_path / "index.pkl").is_file()
+def _get_ranker(model_name="ms-marco-TinyBERT-L-2-v2"):
+    with _resource_locks.hold(("ranker-init", model_name)):
+        if model_name not in _ranker_cache:
+            from flashrank import Ranker
+            _ranker_cache[model_name] = Ranker(model_name=model_name)
+        return _ranker_cache[model_name]
 
 
-def load_index():
-    # Index writes are serialized in-process; loading under the same lock avoids
-    # reading one of FAISS's two persistence files while it is being replaced.
-    with _index_lock:
-        return FAISS.load_local(FAISS_INDEX_PATH, _get_embeddings(), allow_dangerous_deserialization=True)
+def index_exists(corpus_id=None):
+    profile = get_corpus_profile(corpus_id)
+    return all((profile.faiss_index_dir / name).is_file() for name in ("index.faiss", "index.pkl"))
 
 
-def _validated_pdf_paths(pdf_paths: list) -> list[Path]:
-    """Only ingest PDFs already placed under data/, never arbitrary filesystem paths."""
-    data_root = DATA_DIR.resolve()
-    validated = []
-    for raw_path in pdf_paths:
-        candidate = Path(raw_path).resolve()
-        try:
-            candidate.relative_to(data_root)
-        except ValueError as exc:
-            raise ValueError("Los documentos deben estar dentro de data/.") from exc
-        if candidate.suffix.lower() != ".pdf":
-            raise ValueError(f"Solo se permiten PDF: {candidate.name}")
-        if not candidate.is_file():
-            raise FileNotFoundError(f"No encontrado: {candidate.name}")
-        validated.append(candidate)
-    if not validated:
-        raise ValueError("No se recibieron PDFs válidos.")
-    return validated
+def _load_raw(profile):
+    return FAISS.load_local(str(profile.faiss_index_dir), _LazyEmbeddings(profile.embedding_model), allow_dangerous_deserialization=True)
 
 
-def _sha256(file_path: Path) -> str:
-    digest = hashlib.sha256()
-    with file_path.open("rb") as file:
-        for block in iter(lambda: file.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
+def _load_profile_index(profile):
+    paths = [profile.faiss_index_dir / name for name in ("index.faiss", "index.pkl")]
+    fingerprint = tuple((str(path), path.stat().st_mtime_ns, path.stat().st_size) for path in paths)
+    key = (profile.corpus_id, profile.index_version, profile.embedding_model, profile.ingestion_signature(), fingerprint)
+    with _cache_guard:
+        cached = _index_cache.get(key)
+        if cached is not None:
+            _index_cache.move_to_end(key)
+            return cached
+    with _resource_locks.hold(("index-load", key)):
+        with _cache_guard:
+            if key in _index_cache:
+                return _index_cache[key]
+        metadata_path = profile.faiss_index_dir.parent / "bundle.json"
+        if profile.index_version != "legacy" and not metadata_path.is_file():
+            raise ValueError("Faltan los metadatos del índice activo; no se puede verificar su configuración.")
+        if metadata_path.is_file():
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            if metadata["ingestion_signature"] != profile.ingestion_signature():
+                raise ValueError("El índice activo no corresponde al perfil de ingesta; reconstruir y activar otra versión.")
+        vectorstore = _load_raw(profile)
+        limit = max(1, int(os.getenv("RAG_INDEX_CACHE_SIZE", "4")))
+        with _cache_guard:
+            _index_cache[key] = vectorstore
+            while len(_index_cache) > limit:
+                _index_cache.popitem(last=False)
+        return vectorstore
 
 
-def _load_pdf_documents(pdf_path: Path) -> tuple[list, list]:
-    source_name = pdf_path.name
-    source_sha256 = _sha256(pdf_path)
-    print(f"Indexando: {source_name}")
-    documents = PyPDFLoader(str(pdf_path)).load()
-    for doc in documents:
-        # PyPDFLoader stores its page index from zero; API citations use human page numbers.
-        page = doc.metadata.get("page")
-        if isinstance(page, int):
-            doc.metadata["page"] = page + 1
-        doc.metadata.update({"source_file": source_name, "source_sha256": source_sha256, "type": "text"})
-    table_docs = _extract_tables_from_pdf(str(pdf_path), source_name, source_sha256)
-    print(f"  → Texto: {len(documents)} páginas, Tablas: {len(table_docs)}")
-    return documents, table_docs
+def load_index(corpus_id=None):
+    return _load_profile_index(get_corpus_profile(corpus_id))
 
 
-def create_index(pdf_paths: list):
-    pdf_paths = _validated_pdf_paths(pdf_paths)
-    all_text_docs = []
-    all_table_docs = []
-
-    for pdf_path in pdf_paths:
-        documents, table_docs = _load_pdf_documents(pdf_path)
-        all_text_docs.extend(documents)
-        all_table_docs.extend(table_docs)
-
-    if not all_text_docs and not all_table_docs:
-        raise ValueError("No se encontraron documentos.")
-
-    # Chunking: solo aplica a texto; las tablas permanecen intactas como chunks únicos
-    splitter = RecursiveCharacterTextSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP)
-    text_chunks = splitter.split_documents(all_text_docs)
-
-    # Unir chunks de texto + tablas (tablas sin modificar)
-    chunks = text_chunks + all_table_docs
-    print(f"{len(chunks)} fragmentos totales (texto: {len(text_chunks)}, tablas: {len(all_table_docs)})")
-
-    vectorstore = FAISS.from_documents(chunks, _get_embeddings())
-    vectorstore.save_local(FAISS_INDEX_PATH)
-    print(f"Indice guardado en: {FAISS_INDEX_PATH}")
-    return vectorstore
+def clear_index_cache():
+    with _cache_guard:
+        _index_cache.clear()
 
 
-def _add_documents_unlocked(pdf_paths: list):
-    pdf_paths = _validated_pdf_paths(pdf_paths)
-    if not index_exists():
-        return create_index([str(path) for path in pdf_paths])
-
-    existing = load_index()
-    existing_hashes = {
-        document.metadata.get("source_sha256")
-        for document in existing.docstore._dict.values()
-        if document.metadata.get("source_sha256")
-    }
-    existing_names = {
-        document.metadata.get("source_file")
-        for document in existing.docstore._dict.values()
-        if document.metadata.get("source_file")
-    }
-    all_text_docs = []
-    all_table_docs = []
-
-    for pdf_path in pdf_paths:
-        source_hash = _sha256(pdf_path)
-        if source_hash in existing_hashes or pdf_path.name in existing_names:
-            print(f"Omitido (ya indexado): {pdf_path.name}")
-            continue
-        documents, table_docs = _load_pdf_documents(pdf_path)
-        all_text_docs.extend(documents)
-        all_table_docs.extend(table_docs)
-
-    splitter = RecursiveCharacterTextSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP)
-    text_chunks = splitter.split_documents(all_text_docs)
-
-    chunks = text_chunks + all_table_docs
-    if not chunks:
-        raise ValueError("Todos los documentos recibidos ya estaban indexados.")
-    existing.add_documents(chunks)
-    existing.save_local(FAISS_INDEX_PATH)
-    print(f"{len(chunks)} fragmentos agregados (texto: {len(text_chunks)}, tablas: {len(all_table_docs)})")
-    return existing
+def create_index(pdf_paths, corpus_id=None):
+    profile = get_corpus_profile(corpus_id)
+    with corpus_write_lock(profile):
+        chunks = ingest(pdf_paths, profile)
+        vectorstore = FAISS.from_documents(chunks, _get_embeddings(profile.embedding_model))
+        return write_candidate(profile, vectorstore, "rebuild")
 
 
-def add_documents(pdf_paths: list):
-    """Serialize index mutations within this API process."""
-    with _index_lock:
-        return _add_documents_unlocked(pdf_paths)
+def add_documents(pdf_paths, corpus_id=None):
+    """Create a candidate without modifying the active or cached index."""
+    profile = get_corpus_profile(corpus_id)
+    with corpus_write_lock(profile):
+        paths = validated_pdf_paths(pdf_paths, profile)
+        if not all((profile.faiss_index_dir / name).is_file() for name in ("index.faiss", "index.pkl")):
+            vectorstore = FAISS.from_documents(ingest(pdf_paths, profile), _get_embeddings(profile.embedding_model))
+        else:
+            metadata_path = profile.faiss_index_dir.parent / "bundle.json"
+            if not metadata_path.is_file():
+                raise ValueError("Preparar el índice heredado antes de agregar documentos, o usar rebuild.")
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            if not metadata.get("ingestion_verified"):
+                raise ValueError("La configuración de ingesta heredada no está comprobada: usar rebuild antes de agregar fragmentos.")
+            if metadata["ingestion_signature"] != profile.ingestion_signature():
+                raise ValueError("Cambió la ingesta: usar rebuild para no mezclar embeddings o fragmentaciones.")
+            vectorstore = _load_raw(profile)
+            existing = {doc.metadata.get("source_file") for doc in vectorstore.docstore._dict.values()}
+            if any(path.name in existing for path in paths):
+                raise ValueError("Documento ya indexado: usar rebuild para reemplazar su contenido.")
+            vectorstore.add_documents(ingest(pdf_paths, profile))
+        return write_candidate(profile, vectorstore, "append")
 
 
-def rerank_documents(query: str, docs: list, top_k: int = TOP_K_FINAL) -> list:
-    """
-    Reordena chunks con Flashrank (100% local, no consume tokens de LLM).
+def prepare_legacy_index(corpus_id):
+    """Preserve original FAISS, copy its chunks into a hybrid versioned candidate."""
+    profile = get_corpus_profile(corpus_id)
+    legacy = replace(profile, faiss_index_dir=profile.root / "faiss_index",
+                     bm25_index_path=profile.root / "bm25.sqlite3", index_version="legacy")
+    with corpus_write_lock(profile):
+        vectorstore = _load_raw(legacy)
+        verified = set()
+        for doc in vectorstore.docstore._dict.values():
+            name, digest = doc.metadata.get("source_file"), doc.metadata.get("source_sha256")
+            if not name or not digest:
+                raise ValueError("Índice heredado sin hashes de fuente; requiere rebuild.")
+            if (name, digest) not in verified:
+                path = validated_pdf_paths([name], profile)[0]
+                if sha256(path) != digest:
+                    raise ValueError(f"El PDF {name} cambió respecto del índice heredado.")
+                verified.add((name, digest))
+        return write_candidate(profile, vectorstore, "legacy-adoption-unverified-ingestion")
 
-    FAISS usa similitud vectorial (rápido, aproximado).
-    Flashrank usa relevancia semántica real (más preciso) para REORDENAR.
 
-    NOTA: El modelo default (TinyBERT) comprime scores cerca de 1.0.
-    Por eso NO se aplica umbral absoluto de score. El valor del reranking
-    está en poner los chunks más relevantes PRIMERO, no en filtrar.
-    """
+def rerank_documents(query, docs, top_k=TOP_K_FINAL, model_name="ms-marco-TinyBERT-L-2-v2"):
+    if not docs:
+        return []
     try:
         from flashrank import RerankRequest
-
-        ranker = _get_ranker()
-        passages = [{"id": i, "text": doc.page_content, "meta": doc.metadata} for i, doc in enumerate(docs)]
-        results = ranker.rerank(RerankRequest(query=query, passages=passages))
-
-        reranked = []
+        ranker = _get_ranker(model_name)
+        passages = [{"id": i, "text": doc.page_content, "meta": dict(doc.metadata)} for i, doc in enumerate(docs)]
+        with _resource_locks.hold(("ranker-use", model_name)):
+            results = ranker.rerank(RerankRequest(query=query, passages=passages))
+        output = []
         for result in results[:top_k]:
-            original_doc = docs[result["id"]]
-            original_doc.metadata["rerank_score"] = round(result.get("score", 0), 4)
-            reranked.append(original_doc)
-
-        return reranked
-
-    except Exception as e:
-        print(f"Reranking fallo, usando FAISS directo: {e}")
+            doc = docs[result["id"]].model_copy(deep=True)
+            doc.metadata["rerank_score"] = float(result.get("score", 0))
+            output.append(doc)
+        return output
+    except Exception:
+        if os.getenv("RAG_STRICT", "0") == "1":
+            raise
+        logger.exception("Reranking falló; se conserva el orden RRF", extra={"model": model_name})
         return docs[:top_k]
 
 
-def get_retriever_with_reranking(query: str, top_k: int = TOP_K_FINAL) -> list:
+def expand_neighbors(seeds, vectorstore, radius):
+    """Add nearby indexed text chunks, bounded by source/hash and adjacent pages.
+
+    Index order preserves ingestion order. Tables are never treated as text
+    continuations. Added chunks do not inherit the seed's relevance score.
     """
-    Pipeline completo con reranking:
-    1. FAISS recupera FAISS_CANDIDATES (15) candidatos
-    2. Flashrank reordena por relevancia real
-    3. Retorna los mejores top_k chunks
-    """
-    if not index_exists():
-        pdf_files = list(DATA_DIR.glob("*.pdf"))
-        if not pdf_files:
-            raise FileNotFoundError("No hay indice ni PDFs en data/.")
-        with _index_lock:
-            if not index_exists():
-                create_index([str(p) for p in pdf_files])
+    if not radius:
+        return seeds
+    ordered = [vectorstore.docstore.search(cid) for _, cid in sorted(vectorstore.index_to_docstore_id.items())]
+    positions = {chunk_id(doc.metadata, doc.page_content): i for i, doc in enumerate(ordered)}
+    output, seen = [], set()
+    def add(doc, role):
+        cid = chunk_id(doc.metadata, doc.page_content)
+        if cid not in seen:
+            seen.add(cid)
+            copy = doc.model_copy(deep=True)
+            copy.metadata["retrieval_role"] = role
+            output.append(copy)
+    # Preserve all ranked seeds first, including their own scores.
+    for seed in seeds:
+        add(seed, seed.metadata.get("retrieval_role", "ranked"))
+    for seed in seeds:
+        meta = seed.metadata
+        pos = positions.get(chunk_id(meta, seed.page_content))
+        if pos is None or meta.get("type", "text") != "text" or not meta.get("source_sha256") or type(meta.get("page")) is not int:
+            continue
+        # An explicitly requested article often starts near the end of a chunk
+        # and continues across one page boundary. Preserve one additional local
+        # continuation only for that structural anchor, not for every result.
+        seed_radius = radius + 1 if meta.get("retrieval_role") == "explicit_reference" else radius
+        for doc in ordered[max(0, pos - seed_radius):pos + seed_radius + 1]:
+            other = doc.metadata
+            if (other.get("source_file") == meta.get("source_file")
+                    and other.get("source_sha256") == meta["source_sha256"]
+                    and other.get("type", "text") == "text"
+                    and type(other.get("page")) is int
+                    and abs(other["page"] - meta["page"]) <= 1):
+                add(doc, "neighbor")
+    return output
 
-    vectorstore = load_index()
-    candidates = vectorstore.similarity_search(query, k=FAISS_CANDIDATES)
-    return rerank_documents(query, candidates, top_k=top_k)
+
+def retrieve_profile(query, profile, top_k=None):
+    if not profile.bm25_index_path.is_file():
+        raise FileNotFoundError("Preparar y activar un índice híbrido desde /index/prepare o construirlo desde /index.")
+    vectorstore = _load_profile_index(profile)
+    dense = vectorstore.similarity_search(query, k=profile.faiss_candidates)
+    sparse = bm25_search(profile.bm25_index_path, query, profile.bm25_candidates)
+    candidates = rrf_fuse(dense, sparse, profile.rrf_k)
+    k = profile.top_k if top_k is None else top_k
+    seeds = rerank_documents(query, candidates, top_k=k, model_name=profile.rerank_model)
+    if profile.preserve_explicit_references:
+        seeds = retain_explicit_references(query, candidates, seeds, k)
+    return expand_neighbors(seeds, vectorstore, profile.neighbor_chunks)
 
 
-def get_retriever(top_k: int = TOP_K_FINAL):
-    """Retriever sin reranking - mantenido para compatibilidad."""
-    if not index_exists():
-        pdf_files = list(DATA_DIR.glob("*.pdf"))
-        if not pdf_files:
-            raise FileNotFoundError("No hay indice ni PDFs en data/.")
-        with _index_lock:
-            if not index_exists():
-                create_index([str(p) for p in pdf_files])
+def get_retriever_with_reranking(query, top_k=None, corpus_id=None):
+    return retrieve_profile(query, get_corpus_profile(corpus_id), top_k)
 
-    vectorstore = load_index()
-    return vectorstore.as_retriever(search_kwargs={"k": top_k})
+
+def get_retriever(top_k=TOP_K_FINAL, corpus_id=None):
+    return load_index(corpus_id).as_retriever(search_kwargs={"k": top_k})
