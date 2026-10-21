@@ -2,12 +2,10 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Status-Internal%20beta-yellow?style=for-the-badge" alt="Status: Internal beta">
-  <img src="https://img.shields.io/badge/LLM--Judge%20Score-0.862-blue?style=for-the-badge" alt="LLM-Judge Score: 0.862">
-  <img src="https://img.shields.io/badge/Faithfulness-1.0-success?style=for-the-badge" alt="Faithfulness: 1.0">
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.10+">
+  <img src="https://img.shields.io/badge/Python-3.12-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.12">
   <img src="https://img.shields.io/badge/FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white" alt="FastAPI">
   <img src="https://img.shields.io/badge/FAISS-0467DF?style=flat-square&logo=meta&logoColor=white" alt="FAISS">
   <img src="https://img.shields.io/badge/Gemini%20API-8E75B2?style=flat-square&logo=googlegemini&logoColor=white" alt="Gemini API">
@@ -16,39 +14,118 @@
   <img src="https://img.shields.io/badge/License-MIT-yellow?style=flat-square" alt="License MIT">
 </p>
 
-**Multidocument conversational agent with Retrieval Augmented Generation (RAG)** for querying Argentine front-of-pack nutritional labeling regulations (Law 27.642 and Decree 151/2022). Designed to scale across multiple regulatory documents.
+**API RAG conversacional con corpus independientes** para consultar documentación regulatoria argentina: rotulado frontal y Capítulo II del Código Alimentario Argentino. El agente que selecciona herramientas automáticamente es la arquitectura objetivo; actualmente la selección de corpus es explícita.
 
 - 🔍 Local retrieval (FAISS + HuggingFace embeddings, zero cloud costs)
 - 🧠 Generation via Gemini API (free tier, no credits required)
 - 📄 Multidocument ingestion — index and query across multiple PDFs simultaneously
-- 📊 Initial evaluation with an LLM judge — score: 0.862 (not a production certification)
+- 📊 Evaluación RAGAS sobre respuestas guardadas y replays trazables por corpus; no es una certificación de producción
 - ⚡ FastAPI with local Docker build support
+
+---
+
+## Verified Status — 2026-10-21
+
+- **Two indexed corpora:** Argentine Food Code and front-of-pack labeling, each with independent indexes, retrieval profiles and versioned prompts.
+- **Integrated hybrid retrieval:** FAISS + BM25, RRF fusion and FlashRank reranking, with profile-controlled reference retention and neighboring chunks.
+- **27 focused tests passed:** offline embeddings, corpus profiles, explicit references and retrieval.
+- **Three real Gemini runs completed:** replay of `c03`, `r05` and `r08`, with all expected pages retained after the context budget.
+- **7/7 citations verified for provenance:** matched against the evidence delivered to the generator.
+- **Traceable evaluation runs:** recorded questions, responses, evidence, versions and token usage; manifests preserved throughout the replay.
+
+[View replay responses and supporting evidence →](evaluation/AUDITORIA_FONDO_2026-10-21.md)
+
+<details>
+<summary><strong>Validation details</strong></summary>
+
+- **Runtime:** `.venv`; local embeddings default to offline mode. `.env` loads before Hugging Face imports, including CLI entry points. Model resources must be provisioned in the local cache.
+- **Corpus versions:** `codigo-alimentario-v1` uses profile 4 / prompt v3; `rotulado-v1` uses profile 2 / prompt v2. Each maintains its own index and profile.
+- **Context budget:** 20,000 content characters per corpus; headers and instructions are counted separately from this budget.
+- **Test scope:** the 27 passing tests cover the focused areas above, rather than the entire test suite.
+- **Candidate experiment:** expanding from 15/15 to 50/50 candidates reduced sodium retrieval coverage in the diagnostic set, so the change was not promoted. Advertising retrieval remains unresolved in both variants.
+- **Replay protocol:** three successful Gemini calls, at least 35 seconds between starts, no retries and unchanged manifests.
+- **Replay review:** `c03` and `r08` cover the main expected elements. `r05` includes the sodium values but omits the explicit “or” between the general criteria. No new RAGAS judge was run for this replay.
+- **Scope:** these are documented diagnostic results; production certification remains outside the completed validation.
+
+Reference documentation: [operational state](STATE.md), [architecture](ARCHITECTURE.md), [evaluation protocol](EVAL.md) and [history](HISTORY.md). The legacy project context is not the source of current operational state.
+
+</details>
 
 ---
 
 ## 🧩 Architecture Flow
 
 ```mermaid
-flowchart TD
-    A[User Query] --> B[FAISS Multidocument Retrieval]
-    B -->|15 candidates| C[Flashrank Reranking]
-    C -->|Top 3 chunks| D[Gemini LLM Generation]
-    D --> E[Answer + Sources]
+flowchart TB
+    A(["User Query"])
+    API["FastAPI<br/>JWT Authentication"]
 
-    subgraph Data Layer
-        F[Multiple PDFs] --> G[pdfplumber: Table Extraction]
-        G --> H[Chunking: 800 chars / 200 overlap]
-        H --> B
+    subgraph INGESTION["01 · DOCUMENT INGESTION"]
+        direction LR
+        F["Multiple PDFs"]
+        G["PDF Extraction<br/>pypdf: Text<br/>pdfplumber: Tables"]
+        H["Text Chunking<br/>800 / 200 Overlap<br/>Tables Kept Whole"]
+        W["Local Embeddings<br/>HuggingFace"]
+        I[("Versioned Indexes<br/>FAISS + BM25")]
+
+        F --> G --> H --> W --> I
+        H -. "Text + Tables for BM25" .-> I
     end
 
-    style A fill:#4285F4,color:#fff
-    style E fill:#34A853,color:#fff
-    style B fill:#EA4335,color:#fff
-    style C fill:#FBBC05,color:#000
-    style D fill:#8E75B2,color:#fff
+    subgraph RETRIEVAL["02 · RETRIEVAL PIPELINE"]
+        direction LR
+        S["Corpus Selection<br/>History-Aware Query"]
+        B["Hybrid Retrieval<br/>FAISS + BM25"]
+        R["RRF Fusion<br/>Merge Candidate<br/>Rankings"]
+        C["Reranking<br/>FlashRank"]
+        K["Context Assembly<br/>Optional Reference Retention<br/>and Neighbor Expansion"]
+
+        S --> B --> R --> C
+        C -->|"Profile top_k"| K
+    end
+
+    subgraph GENERATION["03 · ANSWER GENERATION"]
+        direction LR
+        D["Gemini + Corpus Prompt<br/>History + Evidence<br/>Structured JSON"]
+        V["Evidence ID Validation<br/>Citation Rendering"]
+        E(["Answer + Sources<br/>+ Citations"])
+
+        D --> V --> E
+    end
+
+    M[("Conversation Memory")]
+    L["Solid arrows: processing<br/>Dashed arrows: index data or conversation state"]
+
+    A --> API --> RETRIEVAL
+    INGESTION -. "Versioned Index Data" .-> RETRIEVAL
+    RETRIEVAL -->|"Selected Evidence"| GENERATION
+    GENERATION -. "Save Conversation Turn" .-> M
+    M -. "Next Turn: User / Corpus / Session" .-> RETRIEVAL
+
+    classDef entry fill:#F8FAFC,stroke:#64748B,stroke-width:1.5px,color:#0F172A;
+    classDef data fill:#EFF6FF,stroke:#7C9BC4,stroke-width:1.5px,color:#1E3A5F;
+    classDef retrieval fill:#E8F0FA,stroke:#6487B1,stroke-width:1.5px,color:#1E3A5F;
+    classDef generation fill:#F2EEFA,stroke:#9B88BB,stroke-width:1.5px,color:#493669;
+    classDef output fill:#E9F5EE,stroke:#6B9F81,stroke-width:1.5px,color:#214E36;
+    classDef memory fill:#F1F5F9,stroke:#94A3B8,stroke-width:1.5px,color:#334155;
+    classDef legend fill:none,stroke:none,color:#64748B,font-size:12px;
+
+    class A,API entry;
+    class F,G,H,W,I data;
+    class S,B,R,C,K retrieval;
+    class D,V generation;
+    class E output;
+    class M memory;
+    class L legend;
+
+    style INGESTION fill:#F8FAFD,stroke:#CBD8E8,stroke-width:1px,color:#1E3A5F
+    style RETRIEVAL fill:#F5F8FC,stroke:#BBCDE2,stroke-width:1px,color:#1E3A5F
+    style GENERATION fill:#FAF8FD,stroke:#D4CBE4,stroke-width:1px,color:#493669
+    linkStyle default stroke:#94A3B8,stroke-width:1.5px
 ```
 
-**Multidocument:** Drop multiple PDFs into `data/` — all are indexed and searchable through a single query endpoint.
+**Multidocument:** cada corpus vive en `corpora/<corpus-id>/`, con sus PDFs, su índice
+FAISS y su manifiesto. Los corpus no se mezclan entre sí.
 
 ---
 
@@ -56,11 +133,14 @@ flowchart TD
 
 | Component | Technology |
 |---|---|
-| Retrieval | FAISS + HuggingFace embeddings (`sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`) |
-| Reranking | Flashrank (`ms-marco-TinyBERT-L-2-v2`) |
-| Table Extraction | pdfplumber |
-| LLM | Google Gemini API free tier (`gemini-3.1-flash-lite`) |
-| API | FastAPI |
+| Retrieval | FAISS CPU 1.15.1 + SQLite FTS5/BM25 + RRF; HuggingFace embeddings (`sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`) |
+| Embedding Runtime | Sentence Transformers 6.1.0 + PyTorch 2.9.0 (CPU) |
+| Reranking | FlashRank 0.2.10 (`ms-marco-TinyBERT-L-2-v2`) |
+| PDF Extraction | pypdf 5.4.0 (text) + pdfplumber 0.11.6 (tables) |
+| LLM | Google Gemini API via `google-genai` 1.16.1; model configured with `GEMINI_MODEL` |
+| API | FastAPI 0.143.5 + Starlette 1.9.0 + Pydantic 2.11.3 |
+| RAG Components | `langchain-core` 1.6.7, `langchain-huggingface` 1.2.2 and `langchain-text-splitters` 1.1.3; project-owned FAISS adapter (without `langchain-community`) |
+| Persistent Memory | SQLAlchemy 2.1.3 + SQLite; optional PostgreSQL/psycopg |
 | Evaluation | Custom LLM-as-a-judge: Faithfulness, Answer Relevancy, Context Precision |
 | Version Control | Git + GitHub |
 
@@ -70,7 +150,7 @@ flowchart TD
 
 ### Requirements
 
-- Python 3.10+
+- Python 3.12 (validated runtime)
 - pip
 - Gemini API key (free tier) from [aistudio.google.com](https://aistudio.google.com/)
 
@@ -89,6 +169,9 @@ source .venv/bin/activate
 
 # Install dependencies
 pip install -r requirements.txt
+
+# For this same .venv to also run RAGAS evaluation and observability tools:
+pip install -r requirements-evaluation.in
 
 # Copy the template, fill in Gemini credentials, a 32+ character JWT secret,
 # and a bcrypt user hash. Never use default credentials.
@@ -118,8 +201,20 @@ this repository:
 docker build -f dockerfile -t rag-agent .
 ```
 
-For deployment, mount or create the versioned FAISS index before accepting
-traffic; it is intentionally excluded from the image as a generated artifact.
+Los documentos, el índice FAISS y la memoria se conservan fuera de la imagen, en
+`corpora/<corpus-id>/`. La imagen es reutilizable; al iniciar el contenedor se
+monta el directorio `corpora/` y se elige el corpus mediante `RAG_CORPUS_ID`.
+
+```powershell
+docker run -d --name rag-agent-local --env-file .env -p 127.0.0.1:8000:8000 `
+  -v "${PWD}\corpora:/app/corpora" rag-agent:corpus-v1
+```
+
+El corpus inicial es `rotulado-v1`. Para crear otro, por ejemplo
+`codigo-alimentario-v1`, se crea `corpora/codigo-alimentario-v1/documents/`,
+se agregan sus PDFs, se genera su índice y se inicia el servicio con
+`RAG_CORPUS_ID=codigo-alimentario-v1`. Nunca se eliminan ni se mezclan los
+datos del corpus anterior.
 
 Open the interactive API documentation at [http://localhost:8000/docs](http://localhost:8000/docs).
 
@@ -149,14 +244,34 @@ Response:
 
 ## Evaluation
 
-The agent has an initial **custom LLM-as-a-judge** evaluation using the following metrics:
+**RAGAS evaluation across 20 saved responses from two corpora**
 
-- **Faithfulness:** 1.0
-- **Answer Relevancy**
-- **Context Precision**
-- **Overall score:** 0.862
+> **0.9167 faithfulness · 4.5/5 relevance and coverage · 4/4 contractual abstentions**
 
-The overall score of **0.862** is a diagnostic baseline across the tested questions and contexts. It is not RAGAS and it does not certify production readiness. **No threshold is applied because TinyBERT compresses scores near 1.0.**
+Evaluated snapshot: **October 20, 2026**, with 10 responses per corpus. Faithfulness covers the 16 answerable cases; relevance and coverage use case-specific rubrics across all 20 cases.
+
+- **Argentine Food Code:** **0.875** faithfulness and **4.6/5** relevance and coverage.
+- **Front-of-pack labeling:** **0.9583** faithfulness and **4.4/5** relevance and coverage.
+- **Evaluator execution:** **52/52 requests completed**, with zero provider errors.
+
+[Read the methodology and case-by-case results →](evaluation/ragas_runs/2026-10-20-full/RESULTADOS.md)
+
+<details>
+<summary><strong>Methodology and scope</strong></summary>
+
+- **Snapshot-based benchmark:** RAGAS evaluated the saved responses and their recorded evidence. These scores describe that snapshot; later runtime corrections and focused replays are documented separately.
+- **Faithfulness:** response claims were evaluated against the saved context for 16 answerable cases.
+- **Relevance and coverage:** `InstanceSpecificRubrics` scored the expected behavior on a 1–5 scale. This is a rubric-based assessment, not the standard `answer_relevancy` metric.
+- **Abstention:** all four expected abstentions passed the persisted response-contract checks. Semantic review of the explanation remains a separate task.
+- **Retrieval:** historical metrics and expected-page labels are available in the linked report. Comparisons must preserve the identity of the dataset and configuration.
+- **Earlier evaluation:** the custom LLM-as-a-judge score of 0.862 belongs to a separate initial evaluation. It is not a RAGAS score or a current runtime metric.
+- **Coverage checks:** high faithfulness alone does not establish that every critical condition was included, as illustrated by `c02`.
+- **Validation strategy:** each corpus needs its own baseline and promotion gate. These small diagnostic sets have also informed adjustments and are not an independent holdout.
+- **Next validation work:** a new control set with human review, scoring of `required_claims` and `critical_conditions`, and validation of retrieval metrics.
+
+**Gemini evaluation protocol:** one request at a time, at least 35 seconds between request starts, no automatic retries and stop on HTTP 429. Each case preserves its question, evidence, response or error, versions, timings and token usage. This conservative cadence does not guarantee provider quota availability.
+
+</details>
 
 ---
 
@@ -168,11 +283,7 @@ The overall score of **0.862** is a diagnostic baseline across the tested questi
 
 ### Prompt Guard
 
-`SYSTEM_PROMPT` includes the following explicit rule:
-
-> When citing thresholds, percentages, or numeric limits, use EXACTLY the document's wording. DO NOT rephrase or paraphrase.
-
-This prevents the LLM from misstating numbers.
+Cada corpus tiene un prompt versionado. La salida estructurada se valida contra los IDs de evidencia recuperados y se renderiza con citas. Este contrato detecta citas ajenas al turno y errores de estructura; no garantiza exactitud semántica, cobertura completa ni ausencia de alucinaciones. Esas propiedades requieren evaluación de respuestas y condiciones críticas.
 
 ---
 
@@ -188,7 +299,7 @@ This prevents the LLM from misstating numbers.
 
 ## Credits
 
-- **RAGAS Evaluation:** LangChain framework
+- **Evaluación:** RAGAS y herramientas de diagnóstico propias; ver los informes reproducibles en `evaluation/`.
 - **Prompt engineering:** Collaboration with Kimi
 - **Retriever optimization:** Balanced `CHUNK_SIZE`, `TOP_K`, and reranking
 
@@ -211,7 +322,7 @@ GitHub: https://github.com/bernytech25/rag-agent
 **v1.0** (2026-07-30)
 
 - [x] Functional RAG with FAISS + Gemini
-- [x] RAGAS evaluation 0.862 score
+- [x] Evaluación inicial custom LLM-as-a-judge: 0.862 (no RAGAS)
 - [x] FastAPI deployed locally
 - [x] pdfplumber for table extraction
 - [x] Guard prompt against number rephrasing
