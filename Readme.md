@@ -102,13 +102,13 @@ flowchart TB
     GENERATION -. "Save Conversation Turn" .-> M
     M -. "Next Turn: User / Corpus / Session" .-> RETRIEVAL
 
-    classDef entry fill:#F8FAFC,stroke:#64748B,stroke-width:1.5px,color:#0F172A;
-    classDef data fill:#EFF6FF,stroke:#7C9BC4,stroke-width:1.5px,color:#1E3A5F;
-    classDef retrieval fill:#E8F0FA,stroke:#6487B1,stroke-width:1.5px,color:#1E3A5F;
-    classDef generation fill:#F2EEFA,stroke:#9B88BB,stroke-width:1.5px,color:#493669;
-    classDef output fill:#E9F5EE,stroke:#6B9F81,stroke-width:1.5px,color:#214E36;
-    classDef memory fill:#F1F5F9,stroke:#94A3B8,stroke-width:1.5px,color:#334155;
-    classDef legend fill:none,stroke:none,color:#64748B,font-size:12px;
+    classDef entry fill:#1E293B,stroke:#94A3B8,stroke-width:1.5px,color:#F8FAFC;
+    classDef data fill:#17344A,stroke:#5487A6,stroke-width:1.5px,color:#F1F5F9;
+    classDef retrieval fill:#3B2C18,stroke:#D5A34C,stroke-width:2px,color:#FFF4DB;
+    classDef generation fill:#34304A,stroke:#9586B2,stroke-width:1.5px,color:#FAF5FF;
+    classDef output fill:#225441,stroke:#76B394,stroke-width:1.5px,color:#F0FDF4;
+    classDef memory fill:#334155,stroke:#94A3B8,stroke-width:1.5px,color:#F8FAFC;
+    classDef legend fill:#1E293B,stroke:#475569,color:#E2E8F0,font-size:12px;
 
     class A,API entry;
     class F,G,H,W,I data;
@@ -118,10 +118,10 @@ flowchart TB
     class M memory;
     class L legend;
 
-    style INGESTION fill:#F8FAFD,stroke:#CBD8E8,stroke-width:1px,color:#1E3A5F
-    style RETRIEVAL fill:#F5F8FC,stroke:#BBCDE2,stroke-width:1px,color:#1E3A5F
-    style GENERATION fill:#FAF8FD,stroke:#D4CBE4,stroke-width:1px,color:#493669
-    linkStyle default stroke:#94A3B8,stroke-width:1.5px
+    style INGESTION fill:#0F1D2B,stroke:#466A85,stroke-width:1px,color:#E2E8F0
+    style RETRIEVAL fill:#211B13,stroke:#D5A34C,stroke-width:2px,color:#F4CB7D
+    style GENERATION fill:#211F30,stroke:#75698C,stroke-width:1px,color:#EDE9F3
+    linkStyle default stroke:#7C8FA3,stroke-width:1.5px
 ```
 
 **Multidocument:** cada corpus vive en `corpora/<corpus-id>/`, con sus PDFs, su índice
